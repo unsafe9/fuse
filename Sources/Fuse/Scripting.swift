@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import os
 
@@ -79,5 +80,40 @@ private func onMain(_ body: @escaping () -> Void) {
         body()
     } else {
         DispatchQueue.main.sync(execute: body)
+    }
+}
+
+/// Returns `body`'s result on the main thread (synchronous, deadlock-safe when already
+/// on main). Used by the read-only scripting properties below.
+private func onMain<T>(_ body: @escaping () -> T) -> T {
+    if Thread.isMainThread {
+        return body()
+    }
+    return DispatchQueue.main.sync(execute: body)
+}
+
+/// Read-only AppleScript properties on the `application` class (feature 2). Each is a
+/// KVC key referenced by `Resources/Fuse.sdef`; the cocoa keys are part of the public
+/// scripting contract (the Alfred workflow depends on the sdef property names). Values
+/// are read from the shared stores on the main thread.
+extension NSApplication {
+    /// The stored preset expression strings, in order. sdef: `presets`.
+    @objc var scriptPresets: [String] {
+        onMain { SettingsStore.shared.presets }
+    }
+
+    /// True iff a timer is currently active. sdef: `running`.
+    @objc var scriptTimerRunning: Bool {
+        onMain { TimerEngine.shared.session != nil }
+    }
+
+    /// Whole seconds remaining, 0 when no timer is running. sdef: `remaining`.
+    @objc var scriptRemainingSeconds: Int {
+        onMain { Int(TimerEngine.shared.remaining.rounded()) }
+    }
+
+    /// The running timer's name, "" when none or unnamed. sdef: `timer name`.
+    @objc var scriptTimerName: String {
+        onMain { TimerEngine.shared.session?.name ?? "" }
     }
 }

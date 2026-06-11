@@ -71,27 +71,6 @@ enum FuseDisplay: Hashable {
     }
 }
 
-// MARK: - Preset mode
-
-/// Which preset section(s) the status menu shows.
-enum PresetMode: String, Codable, CaseIterable {
-    case duration
-    case deadline
-    case both
-
-    /// Human-readable label for settings UI.
-    var displayName: String {
-        switch self {
-        case .duration: return "Duration only"
-        case .deadline: return "Deadline only"
-        case .both: return "Both"
-        }
-    }
-
-    var showsDuration: Bool { self == .duration || self == .both }
-    var showsDeadline: Bool { self == .deadline || self == .both }
-}
-
 // MARK: - Internal notification names
 
 extension Notification.Name {
@@ -146,17 +125,76 @@ enum TimeFormat {
 
 enum DeadlineMath {
     /// Returns the next clock instant strictly after `date` whose minute-of-hour equals
-    /// `mark % 60` (seconds zero). A `mark` of 60 (≡ 0) means the top of the hour. If
-    /// `date` is exactly on the mark, the NEXT occurrence is returned (never a
-    /// zero-length result). DST-safe via `Calendar.nextDate`.
+    /// `minute` (0...59, seconds zero); `minute` 0 means the top of the hour. If `date`
+    /// is exactly on the mark, the NEXT occurrence is returned (never a zero-length
+    /// result). DST-safe via `Calendar.nextDate`.
     ///
-    /// Examples at 14:50: 15 -> 15:15, 30 -> 15:30, 45 -> 15:45, 60 -> 15:00.
+    /// Examples at 14:50: 15 -> 15:15, 30 -> 15:30, 45 -> 15:45, 0 -> 15:00.
     /// At exactly 15:15:00, 15 -> 16:15.
-    static func nextMinuteMark(_ mark: Int, after date: Date, calendar: Calendar = .current) -> Date {
-        let minute = ((mark % 60) + 60) % 60
-        let components = DateComponents(minute: minute, second: 0)
+    static func nextMinuteMark(minute: Int, after date: Date, calendar: Calendar = .current) -> Date {
+        let m = ((minute % 60) + 60) % 60
+        let components = DateComponents(minute: m, second: 0)
         // `.nextTime` skips clock times erased by a DST gap to the next valid match.
         return calendar.nextDate(after: date, matching: components, matchingPolicy: .nextTime)
             ?? date.addingTimeInterval(3600)
+    }
+}
+
+// MARK: - Presets
+
+/// A parsed preset expression: either a fixed-length duration or a minute-of-hour
+/// mark. A preset is just a time expression (the same grammar as the custom panel and
+/// AppleScript). `Preset.parse` classifies the expression so callers can both render a
+/// label and start the right kind of timer without re-parsing.
+enum Preset: Equatable {
+    /// A fixed-length duration in seconds (from `5m`, `1h30m`, `90`, `45s`, ...).
+    case duration(TimeInterval)
+    /// A minute-of-hour mark, 0...59 (from `:MM`; 0 = top of the hour).
+    case mark(Int)
+
+    /// Classifies `expression` via `TimeParser`. Returns nil for invalid input.
+    static func parse(_ expression: String, now: Date = Date()) -> Preset? {
+        let trimmed = expression.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix(":"), let minute = Int(trimmed.dropFirst()),
+           (0...59).contains(minute), trimmed.count == 3 {
+            return .mark(minute)
+        }
+        guard let result = try? TimeParser.parse(trimmed, now: now) else { return nil }
+        switch result {
+        case .duration(let seconds): return .duration(seconds)
+        case .deadline: return nil  // absolute HH:MM is not a valid preset expression
+        }
+    }
+}
+
+/// Pure helpers for rendering a preset expression as a human-readable label. Shared by
+/// `StatusItemController` (menu) and `SettingsView` (settings) so the two views always
+/// agree.
+enum PresetLabel {
+    /// The label for a DURATION preset (e.g. "5 min", "1 h 30 min", "45 sec"). Whole
+    /// minutes reuse `TimeFormat.presetLabel`; sub-minute lengths render as seconds.
+    static func duration(seconds: TimeInterval) -> String {
+        let total = Int(seconds.rounded())
+        if total < 60 {
+            return "\(total) sec"
+        }
+        if total % 60 == 0 {
+            return TimeFormat.presetLabel(minutes: total / 60)
+        }
+        let minutes = total / 60
+        let secs = total % 60
+        return "\(TimeFormat.presetLabel(minutes: minutes)) \(secs) sec"
+    }
+
+    /// The BASE label for a deadline mark (no target time). The status menu appends the
+    /// computed target ("  (15:15)") at menu-open; settings shows the base alone.
+    static func markBase(minute: Int) -> String {
+        minute == 0 ? "Next hour" : "Next :\(String(format: "%02d", minute))"
+    }
+
+    /// A compact label for a deadline mark used in settings (no target time), e.g.
+    /// ":15" or "top of hour" for the top-of-hour mark.
+    static func markSettings(minute: Int) -> String {
+        minute == 0 ? "top of hour" : ":\(String(format: "%02d", minute))"
     }
 }

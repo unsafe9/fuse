@@ -110,39 +110,35 @@ extension StatusItemController: NSMenuDelegate {
             menu.addItem(.separator())
         }
 
-        // 2. Duration presets
-        if store.presetMode.showsDuration {
-            for minutes in store.durationPresets {
-                let label = TimeFormat.presetLabel(minutes: minutes)
-                let item = NSMenuItem(title: label, action: #selector(startDurationPreset(_:)), keyEquivalent: "")
-                item.tag = minutes
-                item.target = self
-                menu.addItem(item)
+        // 2. Presets (one ordered list; deadline targets recomputed every open)
+        for (index, expression) in store.presets.enumerated() {
+            guard let preset = Preset.parse(expression, now: now) else { continue }
+            let item: NSMenuItem
+            switch preset {
+            case .duration(let seconds):
+                item = NSMenuItem(title: PresetLabel.duration(seconds: seconds),
+                                  action: #selector(startPreset(_:)), keyEquivalent: "")
+            case .mark(let minute):
+                let target = DeadlineMath.nextMinuteMark(minute: minute, after: now)
+                item = NSMenuItem(title: markLabel(minute: minute, target: target),
+                                  action: #selector(startPreset(_:)), keyEquivalent: "")
             }
+            item.tag = index
+            item.target = self
+            menu.addItem(item)
+        }
+        if !store.presets.isEmpty {
             menu.addItem(.separator())
         }
 
-        // 3. Deadline presets
-        if store.presetMode.showsDeadline {
-            for mark in store.deadlinePresets {
-                let target = DeadlineMath.nextMinuteMark(mark, after: now)
-                let label = deadlineLabel(target: target)
-                let item = NSMenuItem(title: label, action: #selector(startDeadlinePreset(_:)), keyEquivalent: "")
-                item.tag = mark
-                item.target = self
-                menu.addItem(item)
-            }
-            menu.addItem(.separator())
-        }
-
-        // 4. Custom Timer
+        // 3. Custom Timer
         let customItem = NSMenuItem(title: "Custom Timer\u{2026}", action: #selector(openCustomTimer), keyEquivalent: "")
         customItem.target = self
         menu.addItem(customItem)
 
         menu.addItem(.separator())
 
-        // 5. Permission warning (async refresh; show based on cached status)
+        // 4. Permission warning (async refresh; show based on cached status)
         permissions.refresh { [weak self] in
             // This fires after menu is built; the next open will reflect updated status.
             _ = self
@@ -157,13 +153,13 @@ extension StatusItemController: NSMenuDelegate {
             menu.addItem(warnItem)
         }
 
-        // 6. Settings
+        // 5. Settings
         let settingsItem = NSMenuItem(title: "Settings\u{2026}", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.keyEquivalentModifierMask = .command
         settingsItem.target = self
         menu.addItem(settingsItem)
 
-        // 7. Quit
+        // 6. Quit
         let quitItem = NSMenuItem(title: "Quit Fuse", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         quitItem.keyEquivalentModifierMask = .command
         menu.addItem(quitItem)
@@ -175,17 +171,19 @@ extension StatusItemController: NSMenuDelegate {
         TimerEngine.shared.cancel()
     }
 
-    @objc private func startDurationPreset(_ sender: NSMenuItem) {
-        let minutes = sender.tag
-        TimerEngine.shared.start(duration: TimeInterval(minutes * 60), name: nil)
-    }
-
-    @objc private func startDeadlinePreset(_ sender: NSMenuItem) {
-        // Recompute the target at click time so a menu held open across the mark
-        // (e.g. sleep/wake) still starts a valid, future-dated timer.
-        let mark = sender.tag
-        let target = DeadlineMath.nextMinuteMark(mark, after: Date())
-        TimerEngine.shared.start(until: target, name: nil)
+    @objc private func startPreset(_ sender: NSMenuItem) {
+        let presets = SettingsStore.shared.presets
+        guard presets.indices.contains(sender.tag),
+              let preset = Preset.parse(presets[sender.tag]) else { return }
+        switch preset {
+        case .duration(let seconds):
+            TimerEngine.shared.start(duration: seconds, name: nil)
+        case .mark(let minute):
+            // Recompute the target at click time so a menu held open across the mark
+            // (e.g. sleep/wake) still starts a valid, future-dated timer.
+            let target = DeadlineMath.nextMinuteMark(minute: minute, after: Date())
+            TimerEngine.shared.start(until: target, name: nil)
+        }
     }
 
     @objc private func openCustomTimer() {
@@ -202,19 +200,10 @@ extension StatusItemController: NSMenuDelegate {
 
     // MARK: - Helpers
 
-    private func deadlineLabel(target: Date) -> String {
+    private func markLabel(minute: Int, target: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
         let timeStr = formatter.string(from: target)
-
-        // Derive the prefix from the actual target minute so the label always agrees
-        // with the parenthesized time.
-        let targetMinute = Calendar.current.component(.minute, from: target)
-        if targetMinute == 0 {
-            return "Next hour  (\(timeStr))"
-        } else {
-            let mins = targetMinute < 10 ? "0\(targetMinute)" : "\(targetMinute)"
-            return "Next :\(mins)  (\(timeStr))"
-        }
+        return "\(PresetLabel.markBase(minute: minute))  (\(timeStr))"
     }
 }

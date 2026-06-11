@@ -22,11 +22,15 @@ struct ParseError: Error, Equatable {
 /// - Compound duration: `(\d+h)?(\d+m)?(\d+s)?` with at least one component present,
 ///   e.g. `1h`, `1h30m`, `90m`, `45s`, `1h30m10s` -> `.duration`.
 /// - Bare integer: `25` -> 25 minutes -> `.duration`.
-/// - Clock time: `HH:MM` or `H:MM` (24-hour) -> the NEXT wall-clock occurrence
-///   (today if strictly in the future, else tomorrow), Calendar-based -> `.deadline`.
+/// - Minute-of-hour mark: `:MM` (leading colon, no hour digits, MM = 00–59) -> the
+///   NEXT instant strictly after now whose minute-of-hour == MM (seconds zero);
+///   `:00` is the next top of the hour -> `.deadline`.
+/// - Clock time: `HH:MM` or `H:MM` (24-hour, hour digits before the colon) -> the
+///   NEXT wall-clock occurrence (today if strictly in the future, else tomorrow),
+///   Calendar-based -> `.deadline`.
 ///
 /// Rejections (throw `ParseError`): empty/garbage input, zero or negative totals,
-/// and clock forms with minutes > 59 (or hours > 23).
+/// clock forms with minutes > 59 (or hours > 23), and mark forms with MM > 59.
 ///
 /// OWNER: core. Compiling stub; the rules above are the binding contract.
 enum TimeParser {
@@ -38,7 +42,11 @@ enum TimeParser {
         }
         let lower = trimmed.lowercased()
 
-        // Clock form: HH:MM (contains a colon).
+        // Colon forms. A leading colon (no hour digits) is a minute-of-hour mark;
+        // otherwise it's an absolute HH:MM clock time.
+        if lower.hasPrefix(":") {
+            return try parseMark(lower, now: now)
+        }
         if lower.contains(":") {
             return try parseClock(lower, now: now)
         }
@@ -93,6 +101,20 @@ enum TimeParser {
             throw ParseError(reason: "Duration must be greater than zero.")
         }
         return .duration(total)
+    }
+
+    // MARK: - Minute-of-hour mark
+
+    private static func parseMark(_ s: String, now: Date) throws -> ParseResult {
+        let invalid = ParseError(reason: "Invalid mark. Use :MM with MM 00–59, e.g. :15 or :00.")
+
+        let digits = s.dropFirst()
+        guard digits.count == 2, digits.allSatisfy(\.isNumber), let minute = Int(digits),
+              (0...59).contains(minute) else {
+            throw invalid
+        }
+        let target = DeadlineMath.nextMinuteMark(minute: minute, after: now)
+        return .deadline(target)
     }
 
     // MARK: - Clock time

@@ -5,7 +5,7 @@ import AppKit
 /// `NSHostingController`.
 ///
 /// Binds to `SettingsStore.shared` (passed as an `@ObservedObject`) and exposes every
-/// persisted setting: duration presets, deadline presets, preset mode, fuse color,
+/// persisted setting: the unified preset list, fuse color,
 /// thickness (1–20 pt), edge position, target display (Main Display by default,
 /// All Displays, or a specific screen), overlay master toggle, show-remaining-in-menubar toggle,
 /// notification enabled + body template + sound toggle, prevent-system-sleep toggle,
@@ -37,37 +37,9 @@ private struct GeneralTab: View {
     var body: some View {
         Form {
             Section {
-                Picker("Preset mode", selection: $store.presetMode) {
-                    ForEach(PresetMode.allCases, id: \.self) { mode in
-                        Text(mode.displayName).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
-
-            if store.presetMode.showsDuration {
-                Section {
-                    PresetListEditor(
-                        presets: $store.durationPresets,
-                        label: { TimeFormat.presetLabel(minutes: $0) },
-                        addPrompt: "Minutes"
-                    )
-                } header: {
-                    Text("Duration Presets")
-                }
-            }
-
-            if store.presetMode.showsDeadline {
-                Section {
-                    PresetListEditor(
-                        presets: $store.deadlinePresets,
-                        label: deadlinePresetLabel,
-                        addPrompt: "Minute mark",
-                        maxValue: 60
-                    )
-                } header: {
-                    Text("Deadline Presets")
-                }
+                PresetListEditor(presets: $store.presets)
+            } header: {
+                Text("Presets")
             }
 
             Section {
@@ -77,30 +49,22 @@ private struct GeneralTab: View {
         .formStyle(.grouped)
         .padding()
     }
-
-    /// ":15" for a minute-of-hour mark; 60 (≡ 0) reads as "Top of hour (:00)".
-    private func deadlinePresetLabel(_ mark: Int) -> String {
-        if mark % 60 == 0 {
-            return "Top of hour (:00)"
-        }
-        return ":\(String(format: "%02d", mark % 60))"
-    }
 }
 
 // MARK: - Preset list editor
 
-/// A compact native list editor for a deduplicated `[Int]` preset list whose order
-/// is user-controlled (it drives the menu order). Each row shows a human-readable
-/// `label` with up/down reorder buttons and a remove button; rows can also be
-/// drag-reordered. A footer row appends a new positive value, optionally capped at
-/// `maxValue`.
+/// A compact native list editor for the deduplicated `[String]` preset list whose order
+/// is user-controlled (it drives the menu order). Each row shows a human-readable label
+/// (derived by parsing the expression) with up/down reorder buttons and a remove button;
+/// rows can also be drag-reordered. The footer is a text field that validates a new time
+/// expression through `Preset.parse`; valid, non-duplicate values append to the end,
+/// invalid ones show an inline error and keep focus.
 private struct PresetListEditor: View {
-    @Binding var presets: [Int]
-    let label: (Int) -> String
-    let addPrompt: String
-    var maxValue: Int? = nil
+    @Binding var presets: [String]
 
-    @State private var newValue: Int? = nil
+    @State private var newExpression: String = ""
+    @State private var errorMessage: String = ""
+    @FocusState private var fieldFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -112,7 +76,7 @@ private struct PresetListEditor: View {
                 List {
                     ForEach(Array(presets.enumerated()), id: \.element) { index, value in
                         HStack {
-                            Text(label(value))
+                            Text(rowLabel(value))
                             Spacer()
                             Button {
                                 move(from: index, to: index - 1)
@@ -147,25 +111,31 @@ private struct PresetListEditor: View {
             Divider()
 
             HStack {
-                TextField(addPrompt, value: $newValue, format: .number)
+                TextField("5m, 1h30m, 90, :15, :00", text: $newExpression)
                     .textFieldStyle(.roundedBorder)
-                    .frame(width: 110)
+                    .focused($fieldFocused)
                     .onSubmit { add() }
-                Stepper(
-                    "",
-                    value: Binding(get: { newValue ?? 0 }, set: { newValue = $0 }),
-                    in: 0...(maxValue ?? 10_000)
-                )
-                .labelsHidden()
                 Spacer()
                 Button("Add") { add() }
-                    .disabled(!isAddable(newValue ?? 0))
+                    .disabled(newExpression.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+
+            if !errorMessage.isEmpty {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundColor(.red)
             }
         }
     }
 
-    private func isAddable(_ value: Int) -> Bool {
-        value > 0 && value <= (maxValue ?? Int.max)
+    /// "5 min" / "1 h 30 min" for durations, ":15" / "top of hour" for marks. Unparsable
+    /// (shouldn't occur for stored presets) falls back to the raw expression.
+    private func rowLabel(_ expression: String) -> String {
+        switch Preset.parse(expression) {
+        case .duration(let seconds): return PresetLabel.duration(seconds: seconds)
+        case .mark(let minute): return PresetLabel.markSettings(minute: minute)
+        case nil: return expression
+        }
     }
 
     private func move(from: Int, to: Int) {
@@ -174,10 +144,21 @@ private struct PresetListEditor: View {
     }
 
     private func add() {
-        guard let value = newValue, isAddable(value) else { return }
-        guard !presets.contains(value) else { newValue = nil; return }
-        presets.append(value)
-        newValue = nil
+        let trimmed = newExpression.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        guard Preset.parse(trimmed) != nil else {
+            errorMessage = "Invalid time. Try 5m, 1h30m, 90, :15, or :00."
+            fieldFocused = true
+            return
+        }
+        guard !presets.contains(trimmed) else {
+            errorMessage = "That preset is already in the list."
+            fieldFocused = true
+            return
+        }
+        presets.append(trimmed)
+        newExpression = ""
+        errorMessage = ""
     }
 }
 

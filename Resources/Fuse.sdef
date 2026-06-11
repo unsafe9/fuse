@@ -4,7 +4,7 @@
     <suite name="Fuse Suite" code="Fuse" description="Fuse timer commands.">
         <command name="start timer" code="FuseStrt" description="Start a Fuse timer from a time expression.">
             <cocoa class="Fuse.FuseStartTimerCommand"/>
-            <direct-parameter type="text" description="Time expression, e.g. &quot;5m&quot;, &quot;1h30m&quot;, &quot;90&quot;, &quot;10:00&quot;, &quot;23:30&quot;."/>
+            <direct-parameter type="text" description="Time expression, e.g. &quot;5m&quot;, &quot;1h30m&quot;, &quot;90&quot;, &quot;:15&quot;, &quot;10:00&quot;, &quot;23:30&quot;."/>
             <parameter name="named" code="pNam" type="text" optional="yes" description="Optional timer name.">
                 <cocoa key="name"/>
             </parameter>
@@ -12,5 +12,21 @@
         <command name="stop timer" code="FuseStop" description="Stop the running Fuse timer.">
             <cocoa class="Fuse.FuseStopTimerCommand"/>
         </command>
+        <class name="application" code="capp" description="The Fuse application.">
+            <cocoa class="NSApplication"/>
+            <property name="presets" code="prLs" access="r" description="The stored preset time expressions, in order.">
+                <cocoa key="scriptPresets"/>
+                <type type="text" list="yes"/>
+            </property>
+            <property name="running" code="tmRn" type="boolean" access="r" description="Whether a timer is currently running.">
+                <cocoa key="scriptTimerRunning"/>
+            </property>
+            <property name="remaining" code="tmRm" type="integer" access="r" description="Whole seconds remaining on the running timer, 0 if none.">
+                <cocoa key="scriptRemainingSeconds"/>
+            </property>
+            <property name="timer name" code="tmNm" type="text" access="r" description="The running timer's name, empty if none or unnamed.">
+                <cocoa key="scriptTimerName"/>
+            </property>
+        </class>
     </suite>
 </dictionary>

@@ -16,9 +16,9 @@ final class SettingsStore: ObservableObject {
     // MARK: Defaults keys
 
     private enum Key {
+        static let presets = "presets"
         static let durationPresets = "durationPresets"
         static let deadlinePresets = "deadlinePresets"
-        static let presetMode = "presetMode"
         static let fuseColorHex = "fuseColorHex"
         static let fuseThickness = "fuseThickness"
         static let fusePosition = "fusePosition"
@@ -34,8 +34,9 @@ final class SettingsStore: ObservableObject {
 
     // MARK: Default values
 
-    static let defaultDurationPresets = [1, 3, 5, 10, 15, 20, 30, 45, 60, 90, 120]
-    static let defaultDeadlinePresets = [15, 30, 45, 60]
+    /// Fresh-install presets: durations first, then minute-of-hour marks. Each is a
+    /// time expression (the same grammar as the custom panel and AppleScript).
+    static let defaultPresets = ["1m", "3m", "5m", "10m", "15m", "20m", "30m", "45m", "60m", "90m", "120m", ":15", ":30", ":45", ":00"]
     /// Pure red, fully opaque.
     static let defaultColorHex = "FF1F1FFF"
     static let defaultThickness: Double = 4
@@ -44,20 +45,11 @@ final class SettingsStore: ObservableObject {
 
     // MARK: Published settings (feature 5)
 
-    /// Duration presets in minutes.
-    @Published var durationPresets: [Int] {
-        didSet { defaults.set(durationPresets, forKey: Key.durationPresets) }
-    }
-
-    /// Deadline presets as minute-of-hour marks, 1...60 (each = "next instant whose
-    /// minute equals m % 60"; 60 = top of the hour).
-    @Published var deadlinePresets: [Int] {
-        didSet { defaults.set(deadlinePresets, forKey: Key.deadlinePresets) }
-    }
-
-    /// Which preset section(s) the menu shows.
-    @Published var presetMode: PresetMode {
-        didSet { defaults.set(presetMode.rawValue, forKey: Key.presetMode) }
+    /// Ordered list of preset time expressions (e.g. "5m", "1h30m", ":15", ":00").
+    /// The order drives the status menu order. The user mixes durations and marks
+    /// freely; there is no duration/deadline distinction in storage.
+    @Published var presets: [String] {
+        didSet { defaults.set(presets, forKey: Key.presets) }
     }
 
     /// Fuse color stored as an "RRGGBBAA" hex string.
@@ -128,9 +120,7 @@ final class SettingsStore: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
 
-        durationPresets = (defaults.array(forKey: Key.durationPresets) as? [Int]) ?? Self.defaultDurationPresets
-        deadlinePresets = (defaults.array(forKey: Key.deadlinePresets) as? [Int]) ?? Self.defaultDeadlinePresets
-        presetMode = (defaults.string(forKey: Key.presetMode)).flatMap(PresetMode.init(rawValue:)) ?? .both
+        presets = Self.loadPresets(defaults)
         fuseColorHex = defaults.string(forKey: Key.fuseColorHex) ?? Self.defaultColorHex
         fuseThickness = defaults.object(forKey: Key.fuseThickness) as? Double ?? Self.defaultThickness
         fusePosition = (defaults.string(forKey: Key.fusePosition)).flatMap(FusePosition.init(rawValue:)) ?? .top
@@ -142,6 +132,24 @@ final class SettingsStore: ObservableObject {
         notificationSound = defaults.object(forKey: Key.notificationSound) as? Bool ?? true
         preventSleep = defaults.object(forKey: Key.preventSleep) as? Bool ?? true
         keepAwakeLidClosed = defaults.object(forKey: Key.keepAwakeLidClosed) as? Bool ?? false
+    }
+
+    /// Loads the unified preset list. If the new "presets" key exists, use it. Otherwise
+    /// migrate from the legacy "durationPresets"/"deadlinePresets" int lists (durations
+    /// first, then marks), persisting the result. With neither, use the fresh default.
+    private static func loadPresets(_ defaults: UserDefaults) -> [String] {
+        if let stored = defaults.array(forKey: Key.presets) as? [String] {
+            return stored
+        }
+        let oldDurations = defaults.array(forKey: Key.durationPresets) as? [Int]
+        let oldDeadlines = defaults.array(forKey: Key.deadlinePresets) as? [Int]
+        if oldDurations != nil || oldDeadlines != nil {
+            var migrated = (oldDurations ?? []).map { "\($0)m" }
+            migrated += (oldDeadlines ?? []).map { ":" + String(format: "%02d", $0 % 60) }
+            defaults.set(migrated, forKey: Key.presets)
+            return migrated
+        }
+        return defaultPresets
     }
 
     // MARK: Color helpers
