@@ -7,12 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- New `:MM` minute-of-hour mark time expression (leading colon, `MM` 00–59): targets
+  the next instant whose clock minute equals `MM` with seconds zero (`:00` = the top
+  of the hour). Distinct from absolute `HH:MM` clock times, which have hour digits
+  before the colon. Works in the Custom Timer panel, AppleScript, and presets.
+- AppleScript read-only properties on the application: `presets` (the stored preset
+  expressions, in order), `running` (whether a timer is active), `remaining` (whole
+  seconds left), and `timer name` (the running timer's name). For example:
+  `osascript -e 'tell application "Fuse" to get presets'`.
+
 ### Changed
 
-- Duration and deadline presets can now be reordered manually — drag a row or use
-  its up/down buttons — and that order drives the menu order. New values append to
-  the end; the lists are still deduplicated but no longer force-sorted on insert.
+- Presets are now a single ordered list of time expressions (e.g. `5m`, `1h30m`,
+  `:15`, `:00`) that mixes durations and minute-of-hour marks freely, replacing the
+  separate duration/deadline lists and the duration/deadline/both mode switch. The
+  list is added to via a validating text field, deduplicated, reorderable by drag or
+  up/down buttons, and its order drives the menu order. Existing duration/deadline
+  presets are migrated into the unified list on first launch.
 - Alfred workflow default keyword changed from `timer` to `fuse`.
+- Alfred workflow's empty-query default items now come from the app's configured
+  presets in order (read live from the running app, or from stored settings when it's
+  idle, falling back to the built-in default list) instead of a hardcoded suggestion
+  list, and minute-of-hour marks preview as "Next :15 timer" / "ends at HH:MM". When a
+  timer is running, a Stop item (showing the timer's name and remaining time) is placed
+  at the top of the list.
 - Keep-awake-with-lid-closed no longer requires an administrator password. It now
   disables clamshell-close sleep through the rootless `IOPMrootDomain` user client
   instead of `pmset disablesleep`, and re-asserts the state across Apple Silicon

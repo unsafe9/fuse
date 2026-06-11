@@ -10,7 +10,7 @@ When a timer runs, Fuse draws a line across a full screen edge — over fullscre
 
 - **Menubar-only** — no Dock icon, no window. Lives entirely in a status-bar menu (`LSUIElement`).
 - **Burning-fuse overlay** — a line spanning a full screen edge, visible over all apps, fullscreen windows, and Spaces, shrinking toward a glowing tip as the timer counts down. Configurable color, thickness, edge, and target display.
-- **Presets** — duration presets (default `1/3/5/10/15/20/30/45/60/90/120` minutes) and deadline presets that target the next minute-of-hour mark (default `:15/:30/:45/top of hour`). Show duration only, deadline only, or both.
+- **Presets** — one ordered, reorderable list of time expressions you mix freely: fixed durations (`5m`, `1h30m`, `90`, `45s`) and minute-of-hour marks (`:15`, `:30`, `:45`, `:00`). The list order sets the menu order.
 - **Custom timer panel** — type a time expression (and an optional name) for anything the presets don't cover.
 - **Single timer** — exactly one timer runs at a time; starting a new one silently replaces the running one.
 - **Completion notification** — delivered via the system notification center, with a configurable body and an optional sound.
@@ -46,12 +46,12 @@ This builds the app, bundles it, and installs it to `/Applications/Fuse.app`.
 
 ## Usage
 
-Click the menubar icon to open the menu. It lists your presets in two flavors:
+Click the menubar icon to open the menu. It lists your presets in order. Each preset is a time expression:
 
-- **Duration** presets start a timer for a fixed length (e.g. *25 min*).
-- **Deadline** presets target the next time the clock reaches a given minute-of-hour mark (e.g. at 14:50, *:15* ends at 15:15, *:30* at 15:30, *:45* at 15:45, and *top of hour* at 15:00). Exactly on a mark, the next occurrence is used (at 15:15 sharp, *:15* ends at 16:15).
+- A **duration** expression starts a timer for a fixed length and shows as *25 min*, *1 h 30 min*, *45 sec*, etc.
+- A **minute-of-hour mark** (`:MM`) targets the next time the clock reaches that minute, and shows the computed target time — e.g. at 14:50, *:15* ends at 15:15, *:30* at 15:30, *:45* at 15:45, and *:00* (top of the hour) at 15:00. Exactly on a mark, the next occurrence is used (at 15:15 sharp, *:15* ends at 16:15).
 
-Use **Custom Timer…** for anything else. The panel accepts a time expression and an optional name:
+Use **Custom Timer…** for anything not in your preset list. The panel accepts the same time expressions plus an optional name:
 
 | Expression        | Meaning                                                            |
 | ----------------- | ----------------------------------------------------------------- |
@@ -59,10 +59,11 @@ Use **Custom Timer…** for anything else. The panel accepts a time expression a
 | `1h30m`           | 1 hour 30 minutes (compound `(\d+h)?(\d+m)?(\d+s)?`)              |
 | `90`              | a bare number means minutes → 90 minutes                          |
 | `45s`             | 45 seconds                                                        |
+| `:15`             | minute-of-hour mark → the next time the clock minute hits 15 (`:00` = top of the hour) |
 | `10:00`           | the next occurrence of that 24-hour wall-clock time (today if still in the future, else tomorrow) |
 | `23:30`           | next occurrence of 23:30                                          |
 
-Invalid input (empty, garbage, a zero or negative total, or a clock time with minutes > 59 / hours > 23) is rejected with an inline message.
+A leading-colon `:MM` (no hour digits, `MM` 00–59) is a minute-of-hour mark; with hour digits before the colon it's an absolute `HH:MM` clock time. Invalid input (empty, garbage, a zero or negative total, a mark with `MM` > 59, or a clock time with minutes > 59 / hours > 23) is rejected with an inline message.
 
 **Single-timer semantics:** Fuse runs one timer at a time. Starting a new timer — from a preset, the custom panel, AppleScript, or Alfred — silently replaces whatever was running.
 
@@ -85,6 +86,21 @@ osascript -e 'tell application "Fuse" to stop timer'
 
 The expression grammar is identical to the custom panel. On bad input the command sets an AppleScript error with the same human-readable reason shown in the panel.
 
+Fuse also exposes read-only properties on the application for querying presets and the current timer state:
+
+| Property     | Type         | Meaning                                            |
+| ------------ | ------------ | -------------------------------------------------- |
+| `presets`    | list of text | The stored preset expressions, in order.           |
+| `running`    | boolean      | `true` while a timer is active.                    |
+| `remaining`  | integer      | Whole seconds left on the running timer (`0` if none). |
+| `timer name` | text         | The running timer's name (`""` if none or unnamed). |
+
+```sh
+osascript -e 'tell application "Fuse" to get presets'
+osascript -e 'tell application "Fuse" to get running'
+osascript -e 'tell application "Fuse" to get remaining'
+```
+
 ## Alfred workflow
 
 The workflow source lives in [`alfred/`](alfred/). It drives Fuse through the same AppleScript commands, so the menubar app must be installed (the workflow auto-launches it).
@@ -96,19 +112,18 @@ Default keyword: **`fuse`** (configurable in the workflow's user settings).
 ```
 fuse 5m tea          # start a 5-minute "tea" timer
 fuse 10:00 standup   # start a timer until the next 10:00, named "standup"
+fuse :15 sync        # start a timer until the next :15 minute mark, named "sync"
 fuse stop            # stop the running timer (or "cancel")
 ```
 
-An empty query lists quick suggestions plus a stop action. Each result previews how Fuse will parse the expression before you press Enter.
+An empty query lists your configured presets in order (read from the running app, or from stored settings when it's idle) as the default items — durations preview as "Start 5 min timer" / "ends at HH:MM" and minute-of-hour marks as "Next :15 timer" / "ends at HH:MM". When a timer is running, a Stop item (with the timer's name and remaining time) is shown at the top. Each result previews how Fuse will parse the expression before you press Enter.
 
 ## Settings
 
 Settings open from the menu and are grouped into four tabs. Everything persists in `UserDefaults`.
 
 **General**
-- Preset mode: duration only, deadline only, or both (default both).
-- Duration presets — an editable, reorderable list of minute values (default `1/3/5/10/15/20/30/45/60/90/120`); add with a numeric field (appended to the end), remove per row, and reorder by dragging a row or using its up/down buttons. The list is deduplicated but no longer auto-sorted — its order sets the menu order.
-- Deadline presets — an editable, reorderable list of minute-of-hour marks, 1–60, where 60 means the top of the hour (default `:15/:30/:45/top of hour`), with the same add/remove/reorder controls. Its order likewise sets the menu order.
+- Presets — one editable, reorderable list of time expressions (default `1m/3m/5m/10m/15m/20m/30m/45m/60m/90m/120m/:15/:30/:45/:00`). Durations and minute-of-hour marks live in the same list; add with a text field that validates the expression (appended to the end, invalid input is rejected inline), remove per row, and reorder by dragging a row or using its up/down buttons. The list is deduplicated but not sorted — its order sets the menu order. There is no duration/deadline mode switch.
 - Show remaining time in the menu bar (default on).
 
 **Fuse**
