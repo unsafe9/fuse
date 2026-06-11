@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dictionary SYSTEM "file://localhost/System/Library/DTDs/sdef.dtd">
+<dictionary title="Fuse Terminology">
+    <suite name="Fuse Suite" code="Fuse" description="Fuse timer commands.">
+        <command name="start timer" code="FuseStrt" description="Start a Fuse timer from a time expression.">
+            <cocoa class="Fuse.FuseStartTimerCommand"/>
+            <direct-parameter type="text" description="Time expression, e.g. &quot;5m&quot;, &quot;1h30m&quot;, &quot;90&quot;, &quot;10:00&quot;, &quot;23:30&quot;."/>
+            <parameter name="named" code="pNam" type="text" optional="yes" description="Optional timer name.">
+                <cocoa key="name"/>
+            </parameter>
+        </command>
+        <command name="stop timer" code="FuseStop" description="Stop the running Fuse timer.">
+            <cocoa class="Fuse.FuseStopTimerCommand"/>
+        </command>
+    </suite>
+</dictionary>
