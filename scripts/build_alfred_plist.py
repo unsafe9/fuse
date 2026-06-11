@@ -18,7 +18,7 @@ doc = {
     "webaddress": "",
     "readme": (
         "## Usage\n\n"
-        "Type the keyword (default <kbd>timer</kbd>) then a timer expression:\n\n"
+        "Type the keyword (default <kbd>fuse</kbd>) then a timer expression:\n\n"
         "- `5m`, `1h`, `1h30m`, `45s` — durations\n"
         "- `25` — a bare number means minutes\n"
         "- `10:00`, `23:30` — the next occurrence of that wall-clock time\n\n"
@@ -35,8 +35,8 @@ doc = {
             "label": "Keyword",
             "description": "Keyword that triggers the Fuse timer Script Filter.",
             "config": {
-                "default": "timer",
-                "placeholder": "timer",
+                "default": "fuse",
+                "placeholder": "fuse",
                 "required": False,
                 "trim": True,
             },

@@ -146,7 +146,7 @@
 	<key>readme</key>
 	<string>## Usage
 
-Type the keyword (default &lt;kbd&gt;timer&lt;/kbd&gt;) then a timer expression:
+Type the keyword (default &lt;kbd&gt;fuse&lt;/kbd&gt;) then a timer expression:
 
 - `5m`, `1h`, `1h30m`, `45s` — durations
 - `25` — a bare number means minutes
@@ -194,9 +194,9 @@ Requires the Fuse menubar app; telling it auto-launches it.</string>
 			<key>config</key>
 			<dict>
 				<key>default</key>
-				<string>timer</string>
+				<string>fuse</string>
 				<key>placeholder</key>
-				<string>timer</string>
+				<string>fuse</string>
 				<key>required</key>
 				<false/>
 				<key>trim</key>

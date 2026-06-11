@@ -91,12 +91,12 @@ The workflow source lives in [`alfred/`](alfred/). It drives Fuse through the sa
 
 To install, run `make alfred` (packages `build/Fuse.alfredworkflow`) and open the result with Alfred. `scripts/build_alfred_plist.py` regenerates `alfred/info.plist` from source.
 
-Default keyword: **`timer`** (configurable in the workflow's user settings).
+Default keyword: **`fuse`** (configurable in the workflow's user settings).
 
 ```
-timer 5m tea          # start a 5-minute "tea" timer
-timer 10:00 standup   # start a timer until the next 10:00, named "standup"
-timer stop            # stop the running timer (or "cancel")
+fuse 5m tea          # start a 5-minute "tea" timer
+fuse 10:00 standup   # start a timer until the next 10:00, named "standup"
+fuse stop            # stop the running timer (or "cancel")
 ```
 
 An empty query lists quick suggestions plus a stop action. Each result previews how Fuse will parse the expression before you press Enter.
