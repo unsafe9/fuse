@@ -3,3 +3,4 @@ build/
 *.dmg
 .DS_Store
 .claude/settings.local.json
+__pycache__/
