@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Alfred workflow default keyword changed from `timer` to `fuse`.
+- Keep-awake-with-lid-closed no longer requires an administrator password. It now
+  disables clamshell-close sleep through the rootless `IOPMrootDomain` user client
+  instead of `pmset disablesleep`, and re-asserts the state across Apple Silicon
+  power-source changes (with a periodic heartbeat) so it survives plugging or
+  unplugging the charger.
 
 ## [0.1.0] - 2026-06-11
 

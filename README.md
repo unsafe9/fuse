@@ -133,13 +133,9 @@ While the Fuse tab is open, a live overlay preview is drawn on screen so color, 
 
 **Notifications.** Completion notifications need notification permission. If it hasn't been granted, the menu surfaces a *Notifications disabled — click to fix* item that requests authorization, or opens the System Settings Notifications pane when it has been denied.
 
-**Keep awake with lid closed.** This option uses `pmset disablesleep`, which requires administrator rights. macOS prompts for your password when a timer starts. Fuse restores the setting (`pmset disablesleep 0`) when the timer ends or the app quits — and only if it actually set it.
+**Keep awake with lid closed.** This option disables clamshell-close sleep through the `IOPMrootDomain` user client (the same rootless mechanism Amphetamine's Closed-Display Mode uses) — **no administrator password, ever.** Fuse sets the bit when a timer starts and clears it when the timer ends or the app quits. On Apple Silicon the bit can be dropped across a power-source change (plugging/unplugging the charger), so Fuse re-asserts it on power-source changes and on a periodic heartbeat while a timer runs.
 
-> If Fuse crashes or is force-killed while this option is active, it may leave the system stuck with sleep disabled. Restore it manually:
->
-> ```sh
-> sudo pmset -b disablesleep 0
-> ```
+> The kernel only re-evaluates lid-close sleep when this bit transitions, so Fuse always clears it on every stop path including app termination. If Fuse is force-killed while a timer is active, the bit clears on the next launch's first timer stop; a reboot also clears it.
 
 ## Development
 
