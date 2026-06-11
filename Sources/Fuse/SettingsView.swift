@@ -89,9 +89,11 @@ private struct GeneralTab: View {
 
 // MARK: - Preset list editor
 
-/// A compact native list editor for a sorted, deduplicated `[Int]` preset list.
-/// Each row shows a human-readable `label`; a footer row adds a new positive value,
-/// optionally capped at `maxValue`.
+/// A compact native list editor for a deduplicated `[Int]` preset list whose order
+/// is user-controlled (it drives the menu order). Each row shows a human-readable
+/// `label` with up/down reorder buttons and a remove button; rows can also be
+/// drag-reordered. A footer row appends a new positive value, optionally capped at
+/// `maxValue`.
 private struct PresetListEditor: View {
     @Binding var presets: [Int]
     let label: (Int) -> String
@@ -107,19 +109,39 @@ private struct PresetListEditor: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             } else {
-                ForEach(presets, id: \.self) { value in
-                    HStack {
-                        Text(label(value))
-                        Spacer()
-                        Button {
-                            presets.removeAll { $0 == value }
-                        } label: {
-                            Image(systemName: "minus.circle.fill")
-                                .foregroundColor(.secondary)
+                List {
+                    ForEach(Array(presets.enumerated()), id: \.element) { index, value in
+                        HStack {
+                            Text(label(value))
+                            Spacer()
+                            Button {
+                                move(from: index, to: index - 1)
+                            } label: {
+                                Image(systemName: "chevron.up")
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(index == 0)
+                            Button {
+                                move(from: index, to: index + 1)
+                            } label: {
+                                Image(systemName: "chevron.down")
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(index == presets.count - 1)
+                            Button {
+                                presets.removeAll { $0 == value }
+                            } label: {
+                                Image(systemName: "minus.circle.fill")
+                                    .foregroundColor(.secondary)
+                            }
+                            .buttonStyle(.borderless)
                         }
-                        .buttonStyle(.borderless)
                     }
+                    .onMove { presets.move(fromOffsets: $0, toOffset: $1) }
                 }
+                .listStyle(.plain)
+                .frame(height: CGFloat(presets.count) * 28 + 8)
+                .scrollDisabled(true)
             }
 
             Divider()
@@ -146,10 +168,15 @@ private struct PresetListEditor: View {
         value > 0 && value <= (maxValue ?? Int.max)
     }
 
+    private func move(from: Int, to: Int) {
+        guard presets.indices.contains(from), presets.indices.contains(to) else { return }
+        presets.swapAt(from, to)
+    }
+
     private func add() {
         guard let value = newValue, isAddable(value) else { return }
         guard !presets.contains(value) else { newValue = nil; return }
-        presets = (presets + [value]).sorted()
+        presets.append(value)
         newValue = nil
     }
 }

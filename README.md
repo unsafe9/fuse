@@ -107,8 +107,8 @@ Settings open from the menu and are grouped into four tabs. Everything persists 
 
 **General**
 - Preset mode: duration only, deadline only, or both (default both).
-- Duration presets — an editable list of minute values (default `1/3/5/10/15/20/30/45/60/90/120`); add with a numeric field, remove per row. Kept sorted and deduplicated.
-- Deadline presets — an editable list of minute-of-hour marks, 1–60, where 60 means the top of the hour (default `:15/:30/:45/top of hour`), with the same add/remove list controls.
+- Duration presets — an editable, reorderable list of minute values (default `1/3/5/10/15/20/30/45/60/90/120`); add with a numeric field (appended to the end), remove per row, and reorder by dragging a row or using its up/down buttons. The list is deduplicated but no longer auto-sorted — its order sets the menu order.
+- Deadline presets — an editable, reorderable list of minute-of-hour marks, 1–60, where 60 means the top of the hour (default `:15/:30/:45/top of hour`), with the same add/remove/reorder controls. Its order likewise sets the menu order.
 - Show remaining time in the menu bar (default on).
 
 **Fuse**

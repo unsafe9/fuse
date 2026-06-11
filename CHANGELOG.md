@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Duration and deadline presets can now be reordered manually — drag a row or use
+  its up/down buttons — and that order drives the menu order. New values append to
+  the end; the lists are still deduplicated but no longer force-sorted on insert.
 - Alfred workflow default keyword changed from `timer` to `fuse`.
 - Keep-awake-with-lid-closed no longer requires an administrator password. It now
   disables clamshell-close sleep through the rootless `IOPMrootDomain` user client
