@@ -1,0 +1,67 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Derive version from tag
+        id: version
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"          # e.g. v1.2.3
+          VERSION="${TAG#v}"                # strip leading 'v'
+          echo "tag=$TAG"        >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Sanity-check VERSION file
+        run: |
+          set -euo pipefail
+          FILE_VERSION="$(cat VERSION)"
+          TAG_VERSION="${{ steps.version.outputs.version }}"
+          if [ "$FILE_VERSION" != "$TAG_VERSION" ]; then
+            echo "ERROR: VERSION file ('$FILE_VERSION') does not match tag ('$TAG_VERSION')" >&2
+            exit 1
+          fi
+          echo "VERSION file matches tag: $TAG_VERSION"
+
+      - name: Build DMG
+        run: |
+          set -euo pipefail
+          make dmg ARCHS=universal
+
+      - name: Extract changelog notes
+        id: notes
+        run: |
+          set -euo pipefail
+          chmod +x scripts/release_notes.sh
+          NOTES="$(bash scripts/release_notes.sh "${{ steps.version.outputs.version }}")"
+          if [ -z "$NOTES" ]; then
+            NOTES="Release ${{ steps.version.outputs.tag }}"
+          fi
+          # Write to a file to avoid multiline quoting issues
+          printf '%s\n' "$NOTES" > /tmp/release_notes.txt
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG="${{ steps.version.outputs.tag }}"
+          DMG="build/Fuse-${VERSION}.dmg"
+          gh release create "$TAG" \
+            --title "Fuse ${TAG}" \
+            --notes-file /tmp/release_notes.txt \
+            "$DMG"
