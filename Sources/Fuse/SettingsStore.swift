@@ -23,7 +23,7 @@ final class SettingsStore: ObservableObject {
         static let fuseThickness = "fuseThickness"
         static let fuseTexture = "fuseTexture"
         static let fuseTipEffect = "fuseTipEffect"
-        static let fuseTipSize = "fuseTipSize"
+        static let fuseTipScale = "fuseTipScale"
         static let fusePosition = "fusePosition"
         static let fuseDisplay = "fuseDisplay"
         static let overlayEnabled = "overlayEnabled"
@@ -48,8 +48,11 @@ final class SettingsStore: ObservableObject {
     /// Fresh-install fuse design: a braided rope with a licking flame tip.
     static let defaultTexture: FuseTexture = .rope
     static let defaultTipEffect: FuseTipEffect = .flame
-    static let defaultTipSize: FuseTipSize = .medium
     static let defaultPosition: FusePosition = .top
+    /// Burning-tip size as a multiplier on its base size (1× = the baseline).
+    static let defaultTipScale: Double = 1.0
+    static let minTipScale: Double = 0.5
+    static let maxTipScale: Double = 3.0
 
     // MARK: Published settings (feature 5)
 
@@ -87,9 +90,16 @@ final class SettingsStore: ObservableObject {
         didSet { defaults.set(fuseTipEffect.rawValue, forKey: Key.fuseTipEffect) }
     }
 
-    /// How large the burning-tip effect is drawn.
-    @Published var fuseTipSize: FuseTipSize {
-        didSet { defaults.set(fuseTipSize.rawValue, forKey: Key.fuseTipSize) }
+    /// Burning-tip size multiplier, clamped to `minTipScale...maxTipScale`.
+    @Published var fuseTipScale: Double {
+        didSet {
+            let clamped = min(Self.maxTipScale, max(Self.minTipScale, fuseTipScale))
+            if clamped != fuseTipScale {
+                fuseTipScale = clamped
+                return
+            }
+            defaults.set(fuseTipScale, forKey: Key.fuseTipScale)
+        }
     }
 
     /// Which screen edge the fuse is drawn on.
@@ -148,7 +158,7 @@ final class SettingsStore: ObservableObject {
         fuseThickness = defaults.object(forKey: Key.fuseThickness) as? Double ?? Self.defaultThickness
         fuseTexture = (defaults.string(forKey: Key.fuseTexture)).flatMap(FuseTexture.init(rawValue:)) ?? Self.defaultTexture
         fuseTipEffect = (defaults.string(forKey: Key.fuseTipEffect)).flatMap(FuseTipEffect.init(rawValue:)) ?? Self.defaultTipEffect
-        fuseTipSize = (defaults.string(forKey: Key.fuseTipSize)).flatMap(FuseTipSize.init(rawValue:)) ?? Self.defaultTipSize
+        fuseTipScale = defaults.object(forKey: Key.fuseTipScale) as? Double ?? Self.defaultTipScale
         fusePosition = (defaults.string(forKey: Key.fusePosition)).flatMap(FusePosition.init(rawValue:)) ?? Self.defaultPosition
         fuseDisplay = (defaults.string(forKey: Key.fuseDisplay)).map(FuseDisplay.init(rawValue:)) ?? .main
         overlayEnabled = defaults.object(forKey: Key.overlayEnabled) as? Bool ?? true
@@ -188,7 +198,7 @@ final class SettingsStore: ObservableObject {
         fuseThickness = Self.defaultThickness
         fuseTexture = Self.defaultTexture
         fuseTipEffect = Self.defaultTipEffect
-        fuseTipSize = Self.defaultTipSize
+        fuseTipScale = Self.defaultTipScale
         fusePosition = Self.defaultPosition
     }
 

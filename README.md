@@ -132,7 +132,7 @@ Settings open from the menu and are grouped into four tabs. Everything persists 
 - Thickness, 1–20 pt (default 4).
 - Texture: Solid, Rope (a braided twist, default), or Wick (a wrapped cord). Drawn within the configured thickness.
 - Burning tip: Glow (the classic dot), Flame (a licking flame, default), or Sparks (a flame with trailing embers). Flame and Sparks flicker and bulge a little past the line into the screen so the fire is visible without widening the line itself.
-- Tip size: Small, Medium (default), Large, or Extra Large — scales the burning tip (and the room it has to bulge into the screen).
+- Tip size: a 0.5×–3× slider (default 1×) that scales the burning tip (and the room it has to bulge into the screen).
 - Position: top, bottom, left, or right edge (default top).
 - Display: main display, all displays, or a specific screen (default main display).
 - Reset to Defaults restores color, thickness, texture, burning tip, and position to their defaults (presets, display, notifications, and power options are left alone).
@@ -150,11 +150,11 @@ While the Fuse tab is open, a live overlay preview is drawn on screen so color, 
 
 ## Permissions
 
-**Notifications.** Completion notifications need notification permission. If it hasn't been granted, the menu surfaces a *Notifications disabled — click to fix* item that requests authorization, or opens the System Settings Notifications pane when it has been denied.
+**Notifications.** Completion notifications need notification permission. If it hasn't been granted, the menu surfaces a *Notifications disabled — click to fix* item that requests authorization, or — once denied — deep-links System Settings straight to Fuse's own row in the Notifications pane (via the per-app `…Notifications-Settings.extension?id=<bundle id>` URL) so *Allow Notifications* is one click away.
 
 **Keep awake with lid closed.** This option disables clamshell-close sleep through the `IOPMrootDomain` user client (the same rootless mechanism Amphetamine's Closed-Display Mode uses) — **no administrator password, ever.** Fuse sets the bit when a timer starts and clears it when the timer ends or the app quits. On Apple Silicon the bit can be dropped across a power-source change (plugging/unplugging the charger), so Fuse re-asserts it on power-source changes and on a periodic heartbeat while a timer runs.
 
-> The kernel only re-evaluates lid-close sleep when this bit transitions, so Fuse always clears it on every stop path including app termination. If Fuse is force-killed while a timer is active, the bit clears on the next launch's first timer stop; a reboot also clears it.
+> The kernel only re-evaluates lid-close sleep when this bit transitions, so Fuse always clears it on every stop path including app termination. The bit is global, in-RAM kernel state that the kernel does *not* release when the app dies, so Fuse also persists a flag while it holds the bit and reconciles on the next launch: if it finds the flag set with no timer running (i.e. a previous crash or force-quit), it drops the bit so a closed lid sleeps again. A reboot clears the bit regardless. The only case neither reaches — deleting the app while a timer is mid-run with the bit set — self-heals on the next reboot.
 
 ## Development
 

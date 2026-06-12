@@ -21,8 +21,15 @@ import os
 ///   On Apple Silicon the bit can be dropped across a power-source change, so we
 ///   re-assert it on `IOPSNotification` and on a periodic heartbeat while active.
 ///
+/// The clamshell bit is global, in-RAM kernel state: a reboot clears it, but it is NOT
+/// auto-released when our process dies. So a crash/`SIGKILL`/deletion mid-timer could
+/// otherwise leave a closed lid permanently awake. To guard against that we persist a
+/// `clamshellHeldByFuse` flag while we hold the bit and reconcile on the next launch —
+/// if the flag is set with no timer running, we drop the bit. (A reboot is the backstop
+/// for the one case we can't reach: the app deleted while the bit is still set.)
+///
 /// `TimerEngine.cancel()` on app termination guarantees stop runs, so this manager
-/// fully restores power state on exit.
+/// fully restores power state on a clean exit.
 ///
 /// OWNER: system.
 final class PowerManager {
@@ -31,6 +38,10 @@ final class PowerManager {
     /// `IOPMLibDefs.h`: `#define kPMSetClamshellSleepState 12`. The kernel dispatch for
     /// this selector has no entitlement/privilege check, so it works without root.
     private let clamshellSelector: UInt32 = 12
+
+    /// UserDefaults key, persisted `true` while we hold the global clamshell-disable bit.
+    /// A crash leaves it set; the next launch reconciles it (see `reconcileStaleClamshellHold`).
+    private static let clamshellHeldKey = "clamshellHeldByFuse"
 
     private var assertionID: IOPMAssertionID = 0
     private var hasAssertion = false
@@ -44,6 +55,10 @@ final class PowerManager {
 
     /// Begins observing timer start/stop and power-source notifications.
     init() {
+        // Recover the global clamshell-disable bit if a previous run died without clearing
+        // it — the kernel does not release it on process death.
+        reconcileStaleClamshellHold()
+
         let nc = NotificationCenter.default
         nc.addObserver(self, selector: #selector(timerStarted), name: .fuseTimerStarted, object: nil)
         nc.addObserver(self, selector: #selector(timerStopped), name: .fuseTimerCompleted, object: nil)
@@ -65,6 +80,8 @@ final class PowerManager {
         }
         if store.keepAwakeLidClosed && !lidDisableActive {
             lidDisableActive = true
+            // Persist the hold before flipping the bit, so a crash is always recoverable.
+            UserDefaults.standard.set(true, forKey: Self.clamshellHeldKey)
             setClamshellSleepDisabled(true)
             startLidHeartbeat()
         }
@@ -113,6 +130,19 @@ final class PowerManager {
         lidDisableActive = false
         stopLidHeartbeat()
         setClamshellSleepDisabled(false)
+        // Bit dropped — clear the persisted hold so the next launch has nothing to undo.
+        UserDefaults.standard.set(false, forKey: Self.clamshellHeldKey)
+    }
+
+    /// On launch, drop a clamshell-disable bit that a previous run left set after dying
+    /// without clearing it. Acts only when our own persisted flag is set — so we never
+    /// stomp the bit when we weren't the one holding it — and only here at startup, where
+    /// no timer can yet be keeping the Mac awake.
+    private func reconcileStaleClamshellHold() {
+        guard UserDefaults.standard.bool(forKey: Self.clamshellHeldKey) else { return }
+        log.notice("Clearing a stale clamshell-sleep-disable hold left by a previous run.")
+        setClamshellSleepDisabled(false)
+        UserDefaults.standard.set(false, forKey: Self.clamshellHeldKey)
     }
 
     /// Toggles the `IOPMrootDomain` clamshell-sleep-disable bit. Opens, calls, and

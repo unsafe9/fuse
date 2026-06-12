@@ -219,10 +219,14 @@ private struct FuseTab: View {
                     }
                 }
 
-                Picker("Tip size", selection: $store.fuseTipSize) {
-                    ForEach(FuseTipSize.allCases, id: \.self) { size in
-                        Text(size.displayName).tag(size)
-                    }
+                HStack {
+                    Text("Tip size")
+                    Slider(value: $store.fuseTipScale,
+                           in: SettingsStore.minTipScale...SettingsStore.maxTipScale,
+                           step: 0.1)
+                    Text(String(format: "%.1f×", store.fuseTipScale))
+                        .frame(width: 40, alignment: .trailing)
+                        .monospacedDigit()
                 }
 
                 Picker("Position", selection: $store.fusePosition) {

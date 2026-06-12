@@ -116,35 +116,6 @@ enum FuseTipEffect: String, Codable, CaseIterable {
     var isAnimated: Bool { self != .glow }
 }
 
-/// How large the burning-tip effect is drawn, as a multiplier on its base size. The
-/// overlay strip's interior headroom scales by the same factor, so a bigger tip just
-/// bulges further into the screen without clipping.
-enum FuseTipSize: String, Codable, CaseIterable {
-    case small
-    case medium
-    case large
-    case extraLarge
-
-    var displayName: String {
-        switch self {
-        case .small: return "Small"
-        case .medium: return "Medium"
-        case .large: return "Large"
-        case .extraLarge: return "Extra Large"
-        }
-    }
-
-    /// Multiplier applied to the tip's base size (medium = the baseline).
-    var scale: CGFloat {
-        switch self {
-        case .small: return 0.65
-        case .medium: return 1.0
-        case .large: return 1.5
-        case .extraLarge: return 2.2
-        }
-    }
-}
-
 // MARK: - Internal notification names
 
 extension Notification.Name {

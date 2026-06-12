@@ -43,12 +43,13 @@ final class PermissionManager {
     }
 
     /// Implements the warning item's click action: if `.notDetermined`, request
-    /// authorization; if `.denied`, open the System Settings Notifications pane
-    /// (URL "x-apple.systempreferences:com.apple.Notifications-Settings.extension",
-    /// fallback "x-apple.systempreferences:com.apple.preference.notifications") and
-    /// also bring up Fuse's own Notifications settings so the user can configure both.
+    /// authorization; if `.denied`, deep-link System Settings straight to Fuse's own row
+    /// in the Notifications pane so the user can flip "Allow Notifications" back on. The
+    /// per-app form appends `?id=<bundle id>` to the Notifications extension URL; it only
+    /// works through `NSWorkspace.open` (not the `open` CLI). Falls back to the general
+    /// Notifications pane, then the legacy pane id, if the per-app form is rejected.
     func resolve() {
-        guard Bundle.main.bundleIdentifier != nil else { return }
+        guard let bundleID = Bundle.main.bundleIdentifier else { return }
         switch status {
         case .notDetermined:
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { [weak self] granted, error in
@@ -60,11 +61,11 @@ final class PermissionManager {
                 }
             }
         case .denied:
-            SettingsWindowController.shared.show(selecting: .notifications)
-            let primary = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!
-            let fallback = URL(string: "x-apple.systempreferences:com.apple.preference.notifications")!
-            if NSWorkspace.shared.open(primary) == false {
-                NSWorkspace.shared.open(fallback)
+            let perApp = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(bundleID)")!
+            let pane = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!
+            let legacy = URL(string: "x-apple.systempreferences:com.apple.preference.notifications")!
+            if !NSWorkspace.shared.open(perApp), !NSWorkspace.shared.open(pane) {
+                NSWorkspace.shared.open(legacy)
             }
         default:
             break

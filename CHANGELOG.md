@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Selectable fuse design in the Fuse settings tab: a **Texture** for the line (Solid,
   Rope — a braided twist, default — or Wick — a wrapped cord), a **Burning tip** effect
   (Glow — the classic dot, Flame — a licking flame, default, or Sparks — a flame with
-  trailing embers), and a **Tip size** (Small / Medium, default / Large / Extra Large).
+  trailing embers), and a **Tip size** slider (0.5×–3×, default 1×).
   The flame/sparks flicker, and the live appearance preview animates them. Textures only
   shade the configured-thickness line; the burning tip bulges a little past it (the
   overlay strip carries interior headroom that scales with the tip size) so the flame
@@ -42,9 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   list is added to via a validating text field, deduplicated, reorderable by drag or
   up/down buttons, and its order drives the menu order. Existing duration/deadline
   presets are migrated into the unified list on first launch.
-- The menu's "Notifications disabled — click to fix" item now also opens Fuse's own
-  Notifications settings (alongside the System Settings pane) so both can be configured
-  at once.
+- The menu's "Notifications disabled — click to fix" item now deep-links System Settings
+  straight to Fuse's own row in the Notifications pane (the per-app
+  `…Notifications-Settings.extension?id=<bundle id>` URL) instead of just opening the
+  general Notifications list, so "Allow Notifications" is one click away.
 - Alfred workflow default keyword changed from `timer` to `fuse`.
 - Alfred workflow's empty-query default items now come from the app's configured
   presets in order (read live from the running app, or from stored settings when it's
@@ -56,7 +57,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   disables clamshell-close sleep through the rootless `IOPMrootDomain` user client
   instead of `pmset disablesleep`, and re-asserts the state across Apple Silicon
   power-source changes (with a periodic heartbeat) so it survives plugging or
-  unplugging the charger.
+  unplugging the charger. Because that clamshell bit is global kernel state that the
+  kernel does not release when the app dies, Fuse persists a flag while it holds the bit
+  and reconciles on the next launch — so a crash or force-quit mid-timer can't leave the
+  lid permanently awake (a reboot also clears the bit regardless).
 
 ## [0.1.0] - 2026-06-11
 
