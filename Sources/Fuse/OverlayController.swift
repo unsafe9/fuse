@@ -32,6 +32,7 @@ final class OverlayController {
 
     /// One overlay window per target screen while visible.
     private var windows: [OverlayWindow] = []
+    private var hoverTooltip: FuseHoverTooltipWindow?
     /// 1/30s render timer; non-nil only while the overlay is visible.
     private var renderTimer: Timer?
     private var settingsCancellable: AnyCancellable?
@@ -176,6 +177,7 @@ final class OverlayController {
 
     private func teardown() {
         stopRenderTimer()
+        hideHoverTooltip()
         teardownWindows()
     }
 
@@ -205,9 +207,33 @@ final class OverlayController {
 
     private func tickRender() {
         let progress = renderProgress
+        let mouseLocation = NSEvent.mouseLocation
         for window in windows {
             (window.contentView as? FuseView)?.tick(progress: progress)
         }
+
+        let hoveringFuse = windows.contains { window in
+            guard let view = window.contentView as? FuseView else { return false }
+            return view.containsVisibleFuse(at: mouseLocation, in: window)
+        }
+
+        if isRunning,
+           let session = TimerEngine.shared.session,
+           hoveringFuse {
+            showHoverTooltip(session: session, remaining: TimerEngine.shared.remaining, at: mouseLocation)
+        } else {
+            hideHoverTooltip()
+        }
+    }
+
+    private func showHoverTooltip(session: TimerSession, remaining: TimeInterval, at point: NSPoint) {
+        let tooltip = hoverTooltip ?? FuseHoverTooltipWindow()
+        hoverTooltip = tooltip
+        tooltip.show(session: session, remaining: remaining, at: point)
+    }
+
+    private func hideHoverTooltip() {
+        hoverTooltip?.hide()
     }
 
     // MARK: - Geometry
@@ -288,6 +314,131 @@ private final class OverlayWindow: NSWindow {
     override var canBecomeMain: Bool { false }
 }
 
+private final class FuseHoverTooltipWindow: NSWindow {
+    private let tooltipView = FuseHoverTooltipView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
+
+    init() {
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 1, height: 1),
+                   styleMask: .borderless,
+                   backing: .buffered,
+                   defer: false)
+        level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        isOpaque = false
+        backgroundColor = .clear
+        ignoresMouseEvents = true
+        hasShadow = false
+        isReleasedWhenClosed = false
+        contentView = tooltipView
+    }
+
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+
+    func show(session: TimerSession, remaining: TimeInterval, at point: NSPoint) {
+        let trimmedName = session.name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = trimmedName.flatMap { $0.isEmpty ? nil : $0 } ?? "Timer"
+        tooltipView.update(name: name, remaining: TimeFormat.clock(remaining))
+        let size = tooltipView.preferredSize
+        setContentSize(size)
+        setFrameOrigin(origin(near: point, size: size))
+        orderFrontRegardless()
+    }
+
+    func hide() {
+        orderOut(nil)
+    }
+
+    private func origin(near point: NSPoint, size: NSSize) -> NSPoint {
+        let screenFrame = (NSScreen.screens.first { $0.frame.contains(point) } ?? NSScreen.main)?.frame
+            ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let margin: CGFloat = 8
+        var x = point.x + 12
+        var y = point.y - size.height - 12
+
+        if y < screenFrame.minY + margin {
+            y = point.y + 16
+        }
+
+        x = min(max(x, screenFrame.minX + margin), screenFrame.maxX - size.width - margin)
+        y = min(max(y, screenFrame.minY + margin), screenFrame.maxY - size.height - margin)
+        return NSPoint(x: x, y: y)
+    }
+}
+
+private final class FuseHoverTooltipView: NSView {
+    private var name = "Timer"
+    private var remaining = "0:00"
+    private let maxTextWidth: CGFloat = 240
+    private let padding = NSEdgeInsets(top: 7, left: 10, bottom: 8, right: 10)
+    private let lineGap: CGFloat = 2
+
+    var preferredSize: NSSize {
+        let nameSize = (name as NSString).size(withAttributes: nameAttributes)
+        let remainingSize = (remainingText as NSString).size(withAttributes: remainingAttributes)
+        let width = min(maxTextWidth, max(nameSize.width, remainingSize.width))
+            + padding.left + padding.right
+        let height = nameSize.height + lineGap + remainingSize.height + padding.top + padding.bottom
+        return NSSize(width: ceil(width), height: ceil(height))
+    }
+
+    private var remainingText: String {
+        "\(remaining) left"
+    }
+
+    override var isFlipped: Bool { true }
+
+    func update(name: String, remaining: String) {
+        self.name = name
+        self.remaining = remaining
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.black.withAlphaComponent(0.78).setFill()
+        let background = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 7, yRadius: 7)
+        background.fill()
+
+        NSColor.white.withAlphaComponent(0.14).setStroke()
+        background.lineWidth = 1
+        background.stroke()
+
+        let textWidth = bounds.width - padding.left - padding.right
+        let nameSize = (name as NSString).size(withAttributes: nameAttributes)
+        let nameRect = NSRect(x: padding.left, y: padding.top,
+                              width: textWidth, height: ceil(nameSize.height))
+        let remainingRect = NSRect(x: padding.left, y: nameRect.maxY + lineGap,
+                                   width: textWidth, height: ceil((remainingText as NSString).size(withAttributes: remainingAttributes).height))
+
+        (name as NSString).draw(with: nameRect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
+                                attributes: nameAttributes)
+        (remainingText as NSString).draw(with: remainingRect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
+                                         attributes: remainingAttributes)
+    }
+
+    private var paragraphStyle: NSParagraphStyle {
+        let style = NSMutableParagraphStyle()
+        style.lineBreakMode = .byTruncatingTail
+        return style
+    }
+
+    private var nameAttributes: [NSAttributedString.Key: Any] {
+        [
+            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+            .foregroundColor: NSColor.white,
+            .paragraphStyle: paragraphStyle
+        ]
+    }
+
+    private var remainingAttributes: [NSAttributedString.Key: Any] {
+        [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular),
+            .foregroundColor: NSColor.white.withAlphaComponent(0.78),
+            .paragraphStyle: paragraphStyle
+        ]
+    }
+}
+
 private extension NSScreen {
     /// The `CGDirectDisplayID` backing this screen, or `0` if unavailable.
     var displayID: CGDirectDisplayID {
@@ -350,6 +501,23 @@ final class FuseView: NSView {
         if moved || tipEffect.isAnimated { needsDisplay = true }
     }
 
+    func containsVisibleFuse(at screenPoint: NSPoint, in window: NSWindow) -> Bool {
+        let windowPoint = window.convertPoint(fromScreen: screenPoint)
+        let viewPoint = convert(windowPoint, from: nil)
+        guard bounds.contains(viewPoint) else { return false }
+
+        let edgeLength = position.isHorizontal ? bounds.width : bounds.height
+        let filled = CGFloat(progress) * edgeLength
+        guard filled > 0 else { return false }
+
+        let pad = FuseMetrics.tipPadding(thickness: thickness, scale: tipScale)
+        let point = drawingPoint(from: viewPoint)
+        return point.x >= 0
+            && point.x <= min(edgeLength, filled + pad)
+            && point.y >= 0
+            && point.y <= thickness + pad
+    }
+
     override var isFlipped: Bool { false }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -380,6 +548,19 @@ final class FuseView: NSView {
         drawTexture(in: ctx, length: filled, cross: thickness)
         drawTip(in: ctx, at: CGPoint(x: filled, y: thickness / 2), cross: thickness)
         ctx.restoreGState()
+    }
+
+    private func drawingPoint(from viewPoint: NSPoint) -> NSPoint {
+        switch position {
+        case .top:
+            return NSPoint(x: viewPoint.x, y: bounds.height - viewPoint.y)
+        case .bottom:
+            return viewPoint
+        case .left:
+            return NSPoint(x: viewPoint.y, y: viewPoint.x)
+        case .right:
+            return NSPoint(x: viewPoint.y, y: bounds.width - viewPoint.x)
+        }
     }
 
     // MARK: - Texture (drawn within the thickness band)
