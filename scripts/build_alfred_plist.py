@@ -89,7 +89,9 @@ doc = {
             "version": 1,
             "config": {
                 "lastpathcomponent": False,
-                "onlyshowifquerypopulated": False,
+                # Start emits no output, so empty input here suppresses the banner; only
+                # stop (which prints "Timer stopped") shows a notification.
+                "onlyshowifquerypopulated": True,
                 "removeextension": False,
                 "text": "{query}",
                 "title": "Fuse",
@@ -130,7 +132,7 @@ doc = {
         NOTE: {
             "xpos": 460.0,
             "ypos": 60.0,
-            "note": "Confirm start/stop",
+            "note": "Confirm stop only (start is silent — the fuse shows on screen)",
         },
     },
 }

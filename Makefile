@@ -46,9 +46,9 @@ run: bundle
 
 alfred:
 	@mkdir -p build; \
-	rm -f "build/$(APP_NAME).alfredworkflow"; \
-	(cd alfred && zip -q -r -X "../build/$(APP_NAME).alfredworkflow" . -x '.*'); \
-	echo "alfred: packaged build/$(APP_NAME).alfredworkflow"
+	rm -f "build/$(APP_NAME)-$(VERSION).alfredworkflow"; \
+	(cd alfred && zip -q -r -X "../build/$(APP_NAME)-$(VERSION).alfredworkflow" . -x '.*'); \
+	echo "alfred: packaged build/$(APP_NAME)-$(VERSION).alfredworkflow"
 
 clean:
 	rm -rf .build build
