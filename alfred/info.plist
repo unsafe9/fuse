@@ -127,7 +127,7 @@
 				<key>lastpathcomponent</key>
 				<false/>
 				<key>onlyshowifquerypopulated</key>
-				<false/>
+				<true/>
 				<key>removeextension</key>
 				<false/>
 				<key>text</key>
@@ -161,7 +161,7 @@ Requires the Fuse menubar app; telling it auto-launches it.</string>
 		<key>36882643-ABB0-42BA-929D-AF9B38DA0E1C</key>
 		<dict>
 			<key>note</key>
-			<string>Confirm start/stop</string>
+			<string>Confirm stop only (start is silent — the fuse shows on screen)</string>
 			<key>xpos</key>
 			<real>460.0</real>
 			<key>ypos</key>

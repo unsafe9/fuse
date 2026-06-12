@@ -2,7 +2,9 @@
 # Fuse timer action. Receives the raw Script Filter arg as $1.
 #   "stop" / "cancel"  -> stop the running timer
 #   "EXPR [NAME]"      -> start a timer; first token = EXPR, remainder = NAME
-# Prints a human status line to stdout (consumed by the Post Notification).
+# On stop, prints a status line to stdout (shown by the Post Notification). On start it
+# stays silent: the on-screen fuse is the confirmation, so no notification is fired
+# (the Post Notification has onlyshowifquerypopulated set, so empty output = no banner).
 set -e
 
 raw="$1"
@@ -48,4 +50,4 @@ else
   fi
 fi
 
-print -r -- "Timer started: $raw"
+# Intentionally silent on start: the on-screen fuse is the confirmation.
