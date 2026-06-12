@@ -4,6 +4,8 @@ SHELL := /usr/bin/env bash
 APP_NAME := Fuse
 BUNDLE := build/$(APP_NAME).app
 VERSION := $(shell cat VERSION)
+# The Alfred workflow is versioned and released independently of the app.
+WF_VERSION := $(shell cat alfred/VERSION)
 CONFIG := release
 
 # ARCHS=universal -> build a fat binary for arm64 + x86_64.
@@ -46,9 +48,10 @@ run: bundle
 
 alfred:
 	@mkdir -p build; \
-	rm -f "build/$(APP_NAME)-$(VERSION).alfredworkflow"; \
-	(cd alfred && zip -q -r -X "../build/$(APP_NAME)-$(VERSION).alfredworkflow" . -x '.*'); \
-	echo "alfred: packaged build/$(APP_NAME)-$(VERSION).alfredworkflow"
+	OUT="build/$(APP_NAME)-Workflow-$(WF_VERSION).alfredworkflow"; \
+	rm -f "$$OUT"; \
+	(cd alfred && zip -q -r -X "../$$OUT" . -x '.*' -x 'VERSION' -x 'CHANGELOG.md'); \
+	echo "alfred: packaged $$OUT"
 
 clean:
 	rm -rf .build build

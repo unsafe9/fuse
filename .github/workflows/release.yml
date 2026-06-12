@@ -41,11 +41,6 @@ jobs:
           set -euo pipefail
           make dmg ARCHS=universal
 
-      - name: Package Alfred workflow
-        run: |
-          set -euo pipefail
-          make alfred
-
       - name: Extract changelog notes
         id: notes
         run: |
@@ -66,8 +61,7 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           TAG="${{ steps.version.outputs.tag }}"
           DMG="build/Fuse-${VERSION}.dmg"
-          WORKFLOW="build/Fuse-${VERSION}.alfredworkflow"
           gh release create "$TAG" \
             --title "Fuse ${TAG}" \
             --notes-file /tmp/release_notes.txt \
-            "$DMG" "$WORKFLOW"
+            "$DMG"

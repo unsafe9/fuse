@@ -1,0 +1,77 @@
+name: Release Alfred Workflow
+
+on:
+  push:
+    tags:
+      - 'workflow-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Derive version from tag
+        id: version
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"              # e.g. workflow-v1.2.3
+          VERSION="${TAG#workflow-v}"           # strip leading 'workflow-v'
+          echo "tag=$TAG"         >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Sanity-check alfred/VERSION
+        run: |
+          set -euo pipefail
+          FILE_VERSION="$(cat alfred/VERSION)"
+          TAG_VERSION="${{ steps.version.outputs.version }}"
+          if [ "$FILE_VERSION" != "$TAG_VERSION" ]; then
+            echo "ERROR: alfred/VERSION ('$FILE_VERSION') does not match tag ('$TAG_VERSION')" >&2
+            exit 1
+          fi
+          echo "alfred/VERSION matches tag: $TAG_VERSION"
+
+      - name: Verify info.plist version matches alfred/VERSION
+        run: |
+          set -euo pipefail
+          PLIST_VERSION="$(python3 -c "import plistlib; print(plistlib.load(open('alfred/info.plist','rb'))['version'])")"
+          FILE_VERSION="$(cat alfred/VERSION)"
+          if [ "$PLIST_VERSION" != "$FILE_VERSION" ]; then
+            echo "ERROR: alfred/info.plist version ('$PLIST_VERSION') != alfred/VERSION ('$FILE_VERSION'). Run scripts/build_alfred_plist.py and commit." >&2
+            exit 1
+          fi
+          echo "info.plist version matches alfred/VERSION: $FILE_VERSION"
+
+      - name: Package Alfred workflow
+        run: |
+          set -euo pipefail
+          make alfred
+
+      - name: Extract changelog notes
+        id: notes
+        run: |
+          set -euo pipefail
+          chmod +x scripts/release_notes.sh
+          NOTES="$(CHANGELOG=alfred/CHANGELOG.md bash scripts/release_notes.sh "${{ steps.version.outputs.version }}")"
+          if [ -z "$NOTES" ]; then
+            NOTES="Fuse Alfred workflow ${{ steps.version.outputs.version }}"
+          fi
+          printf '%s\n' "$NOTES" > /tmp/wf_release_notes.txt
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG="${{ steps.version.outputs.tag }}"
+          WORKFLOW="build/Fuse-Workflow-${VERSION}.alfredworkflow"
+          gh release create "$TAG" \
+            --title "Fuse Alfred Workflow ${VERSION}" \
+            --notes-file /tmp/wf_release_notes.txt \
+            "$WORKFLOW"

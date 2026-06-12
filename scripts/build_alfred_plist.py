@@ -3,6 +3,13 @@
 import plistlib
 import os
 
+ALFRED_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "alfred")
+
+# The workflow's own version (its release channel is independent of the app's). Single
+# source of truth: alfred/VERSION, surfaced in info.plist so Alfred shows it.
+with open(os.path.join(ALFRED_DIR, "VERSION")) as _f:
+    WORKFLOW_VERSION = _f.read().strip()
+
 SF = "98CA8C73-9A9E-4FD6-ACD7-B01B55351900"  # Script Filter
 RUN = "C3C073DC-4A22-4C87-8C57-39752CC98772"  # Run Script
 NOTE = "36882643-ABB0-42BA-929D-AF9B38DA0E1C"  # Post Notification
@@ -14,7 +21,7 @@ doc = {
     "createdby": "unsafe9",
     "category": "Productivity",
     "disabled": False,
-    "version": "1.0",
+    "version": WORKFLOW_VERSION,
     "webaddress": "",
     "readme": (
         "## Usage\n\n"
@@ -137,7 +144,7 @@ doc = {
     },
 }
 
-out = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "alfred", "info.plist")
+out = os.path.join(ALFRED_DIR, "info.plist")
 with open(out, "wb") as f:
     plistlib.dump(doc, f, sort_keys=True)
 print("wrote", out)

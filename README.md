@@ -105,7 +105,7 @@ osascript -e 'tell application "Fuse" to get remaining'
 
 The workflow source lives in [`alfred/`](alfred/). It drives Fuse through the same AppleScript commands, so the menubar app must be installed (the workflow auto-launches it).
 
-To install, download `Fuse-<version>.alfredworkflow` from the [latest release](https://github.com/unsafe9/fuse/releases/latest) and open it with Alfred, or build it yourself with `make alfred` (packages `build/Fuse-<version>.alfredworkflow`). `scripts/build_alfred_plist.py` regenerates `alfred/info.plist` from source.
+The workflow is versioned and released **independently of the app**, under `workflow-v*` tags (the app uses `v*`). To install, grab `Fuse-Workflow-<version>.alfredworkflow` from a [workflow release](https://github.com/unsafe9/fuse/releases?q=workflow-v&expanded=true) and open it with Alfred, or build it yourself with `make alfred`. Its version lives in `alfred/VERSION`; `scripts/build_alfred_plist.py` regenerates `alfred/info.plist` from that plus source, and `alfred/CHANGELOG.md` tracks its history.
 
 Default keyword: **`fuse`** (configurable in the workflow's user settings).
 
