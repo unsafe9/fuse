@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-06-12
+
+### Added
+
+- Hovering over the on-screen fuse now shows a compact tooltip with the running timer's
+  name and remaining time.
+
 ## [0.1.1] - 2026-06-12
 
 ### Added
