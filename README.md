@@ -130,10 +130,12 @@ Settings open from the menu and are grouped into four tabs. Everything persists 
 - Enable overlay (master toggle, default on).
 - Fuse color (default pure red).
 - Thickness, 1–20 pt (default 4).
+- Texture: Solid, Rope (a braided twist, default), or Wick (a wrapped cord). Drawn within the configured thickness.
+- Burning tip: Glow (the classic dot), Flame (a licking flame, default), or Sparks (a flame with trailing embers). Flame and Sparks flicker.
 - Position: top, bottom, left, or right edge (default top).
 - Display: main display, all displays, or a specific screen (default main display).
 
-While the Fuse tab is open, a live overlay preview is drawn on screen so color, thickness, position, and display changes are visible immediately, even with no timer running. A real running timer always takes over.
+While the Fuse tab is open, a live overlay preview is drawn on screen so color, thickness, texture, burning tip, position, and display changes are visible immediately (the flame/sparks even animate), even with no timer running. A real running timer always takes over.
 
 **Notifications**
 - Enable notifications (default on).

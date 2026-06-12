@@ -151,6 +151,8 @@ final class OverlayController {
         let position = SettingsStore.shared.fusePosition
         let thickness = CGFloat(SettingsStore.shared.fuseThickness)
         let color = SettingsStore.shared.fuseColor
+        let texture = SettingsStore.shared.fuseTexture
+        let tipEffect = SettingsStore.shared.fuseTipEffect
 
         for screen in targetScreens() {
             let frame = stripFrame(for: screen.frame, position: position, thickness: thickness)
@@ -159,7 +161,9 @@ final class OverlayController {
             view.position = position
             view.fuseColor = color
             view.thickness = thickness
-            view.update(progress: renderProgress)
+            view.texture = texture
+            view.tipEffect = tipEffect
+            view.setProgress(renderProgress)
             window.contentView = view
             window.orderFrontRegardless()
             windows.append(window)
@@ -200,7 +204,7 @@ final class OverlayController {
     private func tickRender() {
         let progress = renderProgress
         for window in windows {
-            (window.contentView as? FuseView)?.update(progress: progress)
+            (window.contentView as? FuseView)?.tick(progress: progress)
         }
     }
 
@@ -275,21 +279,30 @@ private extension NSScreen {
 
 // MARK: - Fuse view
 
-/// Layer-backed view rendering the fuse line and its glowing burning tip.
+/// Layer-backed view rendering the fuse line, its chosen texture, and its burning tip.
 ///
 /// Draws a filled bar of length `progress × edgeLength` from the anchored end, in
-/// `SettingsStore.shared.fuseColor` at `fuseThickness`, plus a brighter/whiter glow
-/// dot at the receding tip. Reads progress live from `TimerEngine.shared`. Set frames
-/// directly / disable implicit actions so the 1/30s render timer is authoritative.
+/// `SettingsStore.shared.fuseColor` at `fuseThickness`, overlaid with the selected
+/// `FuseTexture` (solid / rope / wick) and ending in the selected `FuseTipEffect`
+/// (glow / flame / sparks). All drawing happens in a local space where +x is the burn
+/// direction so one code path serves all four edges; the texture only shades the bar
+/// and the tip elongates along the burn axis, so neither exceeds the thickness band.
+/// Reads progress live from `TimerEngine.shared`; the 1/30s render timer also advances
+/// a flicker `phase` so animated tips shimmer. Set frames directly / disable implicit
+/// actions so the render timer is authoritative.
 ///
-/// OWNER: overlay. Compiling stub.
+/// OWNER: overlay.
 final class FuseView: NSView {
     /// Edge the fuse is drawn along; controls anchoring + axis.
     var position: FusePosition = .top
     var fuseColor: NSColor = .red
     var thickness: CGFloat = 4
+    var texture: FuseTexture = .rope
+    var tipEffect: FuseTipEffect = .flame
 
     private var progress: Double = 1
+    /// Monotonic frame counter driving tip flicker; advanced by the render timer.
+    private var phase: Int = 0
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -301,12 +314,20 @@ final class FuseView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not supported") }
 
-    /// Called by the render timer with the live progress fraction (1 → full, 0 → empty).
-    func update(progress: Double) {
-        let clamped = min(1, max(0, progress))
-        guard clamped != self.progress else { return }
-        self.progress = clamped
+    /// Sets the progress and forces a redraw (initial draw / settings change).
+    func setProgress(_ progress: Double) {
+        self.progress = min(1, max(0, progress))
         needsDisplay = true
+    }
+
+    /// Called by the render timer: stores progress, advances the flicker phase, and
+    /// redraws when the bar moved or the chosen tip effect animates.
+    func tick(progress: Double) {
+        let clamped = min(1, max(0, progress))
+        let moved = clamped != self.progress
+        self.progress = clamped
+        phase &+= 1
+        if moved || tipEffect.isAnimated { needsDisplay = true }
     }
 
     override var isFlipped: Bool { false }
@@ -321,47 +342,229 @@ final class FuseView: NSView {
         let filled = CGFloat(progress) * edgeLength
         guard filled > 0 else { return }
 
-        let barRect: NSRect
-        // Anchor the burning end: horizontal at left, vertical at bottom; the receding
-        // tip is the far end of the filled segment.
-        switch position {
-        case .top, .bottom:
-            barRect = NSRect(x: 0, y: 0, width: filled, height: thickness)
-        case .left, .right:
-            barRect = NSRect(x: 0, y: 0, width: thickness, height: filled)
+        ctx.saveGState()
+        // Draw in a local space where +x is the burn direction (tip at x = filled) and y
+        // spans the thickness band. Vertical edges are the transpose of horizontal — the
+        // anchor (left/bottom) and tip placement follow automatically — so one set of
+        // drawing code serves all four positions.
+        if !horizontal {
+            ctx.concatenate(CGAffineTransform(a: 0, b: 1, c: 1, d: 0, tx: 0, ty: 0))
         }
 
-        ctx.setFillColor(fuseColor.cgColor)
-        ctx.fill(barRect)
-
-        // Glowing burning tip at the receding end.
-        let tipCenter: CGPoint
-        switch position {
-        case .top, .bottom:
-            tipCenter = CGPoint(x: barRect.maxX, y: barRect.midY)
-        case .left, .right:
-            tipCenter = CGPoint(x: barRect.midX, y: barRect.maxY)
-        }
-        drawGlowTip(in: ctx, at: tipCenter)
+        drawTexture(in: ctx, length: filled, cross: thickness)
+        drawTip(in: ctx, at: CGPoint(x: filled, y: thickness / 2), cross: thickness)
+        ctx.restoreGState()
     }
 
-    /// A brighter/whiter dot with a soft glow at the receding tip.
-    private func drawGlowTip(in ctx: CGContext, at center: CGPoint) {
-        let radius = max(thickness * 0.9, 3)
-        let dotRect = NSRect(x: center.x - radius, y: center.y - radius,
-                             width: radius * 2, height: radius * 2)
+    // MARK: - Texture (drawn within the thickness band)
 
-        // Whiten the base color for the burning core.
+    private func drawTexture(in ctx: CGContext, length: CGFloat, cross: CGFloat) {
+        let band = CGRect(x: 0, y: 0, width: length, height: cross)
+        ctx.saveGState()
+        ctx.clip(to: band)
+
+        ctx.setFillColor(fuseColor.cgColor)
+        ctx.fill(band)
+
+        switch texture {
+        case .solid:
+            break
+        case .rope:
+            drawRoundShading(in: ctx, band: band)
+            drawRopeStrands(in: ctx, band: band)
+        case .wick:
+            drawRoundShading(in: ctx, band: band)
+            drawWickBindings(in: ctx, band: band)
+        }
+        ctx.restoreGState()
+    }
+
+    /// A cylindrical sheen across the band: shaded edges, a soft highlight down the
+    /// middle. Makes the cord read as round rather than a flat ribbon.
+    private func drawRoundShading(in ctx: CGContext, band: CGRect) {
+        let space = CGColorSpaceCreateDeviceRGB()
+        let clear = fuseColor.withAlphaComponent(0).cgColor
+        let edge = darken(fuseColor, 0.4).withAlphaComponent(0.55).cgColor
+        let sheen = lighten(fuseColor, 0.55).withAlphaComponent(0.5).cgColor
+        let bottom = CGPoint(x: band.midX, y: band.minY)
+        let top = CGPoint(x: band.midX, y: band.maxY)
+
+        if let g = CGGradient(colorsSpace: space, colors: [edge, clear, clear, edge] as CFArray,
+                              locations: [0, 0.3, 0.7, 1]) {
+            ctx.drawLinearGradient(g, start: bottom, end: top, options: [])
+        }
+        if let g = CGGradient(colorsSpace: space, colors: [clear, sheen, clear] as CFArray,
+                              locations: [0.32, 0.5, 0.68]) {
+            ctx.drawLinearGradient(g, start: bottom, end: top, options: [])
+        }
+    }
+
+    /// Diagonal light strands with shadowed grooves between them — a braided twist.
+    private func drawRopeStrands(in ctx: CGContext, band: CGRect) {
+        let c = band.height
+        let period = max(c * 1.25, 5)
+        let light = lighten(fuseColor, 0.6).withAlphaComponent(0.5).cgColor
+        let groove = darken(fuseColor, 0.45).withAlphaComponent(0.45).cgColor
+
+        ctx.setLineCap(.butt)
+        var x = -c
+        while x < band.maxX {
+            ctx.setStrokeColor(light)
+            ctx.setLineWidth(max(c * 0.2, 1))
+            ctx.move(to: CGPoint(x: x, y: 0))
+            ctx.addLine(to: CGPoint(x: x + c, y: c))
+            ctx.strokePath()
+
+            ctx.setStrokeColor(groove)
+            ctx.setLineWidth(max(c * 0.12, 0.5))
+            ctx.move(to: CGPoint(x: x + period * 0.5, y: 0))
+            ctx.addLine(to: CGPoint(x: x + period * 0.5 + c, y: c))
+            ctx.strokePath()
+
+            x += period
+        }
+    }
+
+    /// Periodic darker cross-bands, like the wrappings on a wick/cord.
+    private func drawWickBindings(in ctx: CGContext, band: CGRect) {
+        let c = band.height
+        let period = max(c * 1.8, 8)
+        let w = period * 0.3
+        ctx.setFillColor(darken(fuseColor, 0.45).withAlphaComponent(0.7).cgColor)
+        var x = period * 0.5
+        while x < band.maxX {
+            ctx.fill(CGRect(x: x - w / 2, y: 0, width: w, height: c))
+            x += period
+        }
+    }
+
+    // MARK: - Burning tip
+
+    private func drawTip(in ctx: CGContext, at tip: CGPoint, cross c: CGFloat) {
+        switch tipEffect {
+        case .glow:
+            drawGlow(in: ctx, at: tip, cross: c)
+        case .flame:
+            drawFlame(in: ctx, at: tip, cross: c)
+        case .spark:
+            drawFlame(in: ctx, at: tip, cross: c)
+            drawSparks(in: ctx, at: tip, cross: c)
+        }
+    }
+
+    /// A brighter/whiter dot with a soft glow (classic).
+    private func drawGlow(in ctx: CGContext, at center: CGPoint, cross c: CGFloat) {
+        let radius = max(c * 0.9, 3)
+        let dotRect = CGRect(x: center.x - radius, y: center.y - radius,
+                             width: radius * 2, height: radius * 2)
         let base = fuseColor.usingColorSpace(.sRGB) ?? fuseColor
         let glowColor = NSColor(srgbRed: min(1, base.redComponent * 0.4 + 0.6),
                                 green: min(1, base.greenComponent * 0.4 + 0.6),
                                 blue: min(1, base.blueComponent * 0.4 + 0.6),
                                 alpha: 1)
-
         ctx.saveGState()
         ctx.setShadow(offset: .zero, blur: radius * 1.6, color: fuseColor.cgColor)
         ctx.setFillColor(glowColor.cgColor)
         ctx.fillEllipse(in: dotRect)
         ctx.restoreGState()
+    }
+
+    /// A layered flame that licks along the burn axis: a fuse-tinted halo, an amber
+    /// body, and a white-hot core. Elongated in x (compressed in y) so it stays within
+    /// the thickness band, and scaled by a gentle flicker each frame.
+    private func drawFlame(in ctx: CGContext, at tip: CGPoint, cross c: CGFloat) {
+        let space = CGColorSpaceCreateDeviceRGB()
+        let f = flicker()
+        let clear = fuseColor.withAlphaComponent(0).cgColor
+
+        // Outer halo, tinted by the fuse color so the line's hue carries into the flame.
+        let halo = blend(fuseColor, NSColor(srgbRed: 1, green: 0.35, blue: 0.05, alpha: 1), 0.5)
+            .withAlphaComponent(0.5).cgColor
+        drawRadial(ctx, space, [halo, clear], [0, 1],
+                   center: tip, radius: max(c * 1.2, 5) * f, scaleX: 1.3, scaleY: 0.5)
+
+        // Amber body with a hot core, licking backward from the tip along the fuse.
+        let amber = NSColor(srgbRed: 1, green: 0.72, blue: 0.18, alpha: 0.95).cgColor
+        let core = NSColor(srgbRed: 1, green: 0.98, blue: 0.85, alpha: 1).cgColor
+        drawRadial(ctx, space, [core, amber, clear], [0, 0.45, 1],
+                   center: tip, radius: max(c * 1.0, 4) * f, scaleX: 1.7, scaleY: 0.5)
+
+        // Tight white-hot center right at the burn point.
+        let white = NSColor(srgbRed: 1, green: 1, blue: 0.95, alpha: 1).cgColor
+        drawRadial(ctx, space, [white, clear], [0, 1],
+                   center: tip, radius: max(c * 0.45, 2), scaleX: 1.3, scaleY: 0.5)
+    }
+
+    /// A few flickering embers scattered around the burn point, fading with their
+    /// deterministic per-frame "life" so they twinkle without random state.
+    private func drawSparks(in ctx: CGContext, at tip: CGPoint, cross c: CGFloat) {
+        let ember = NSColor(srgbRed: 1, green: 0.9, blue: 0.55, alpha: 1)
+        for i in 0..<6 {
+            let seed = phase / 2 + i * 37
+            let life = hash01(seed)                              // 0..1
+            let dist = (0.3 + life) * max(c * 2.4, 8)
+            let sx = tip.x - dist                                // trail back over the cord
+            let sy = tip.y + (hash01(seed &* 3) - 0.5) * c * 0.9
+            let alpha = 1 - life
+            let r = max(c * 0.18, 0.8) * alpha
+            guard r > 0.3 else { continue }
+            ctx.saveGState()
+            ctx.setShadow(offset: .zero, blur: r * 1.5,
+                          color: NSColor(srgbRed: 1, green: 0.55, blue: 0.1, alpha: alpha).cgColor)
+            ctx.setFillColor(ember.withAlphaComponent(alpha).cgColor)
+            ctx.fillEllipse(in: CGRect(x: sx - r, y: sy - r, width: r * 2, height: r * 2))
+            ctx.restoreGState()
+        }
+    }
+
+    // MARK: - Drawing helpers
+
+    /// Draws a radial gradient (center → edge) at `center`, optionally elongated by
+    /// `scaleX`/`scaleY` to make a flame lick along an axis.
+    private func drawRadial(_ ctx: CGContext, _ space: CGColorSpace,
+                            _ colors: [CGColor], _ locations: [CGFloat],
+                            center: CGPoint, radius: CGFloat,
+                            scaleX: CGFloat, scaleY: CGFloat) {
+        guard radius > 0,
+              let g = CGGradient(colorsSpace: space, colors: colors as CFArray, locations: locations)
+        else { return }
+        ctx.saveGState()
+        ctx.translateBy(x: center.x, y: center.y)
+        ctx.scaleBy(x: scaleX, y: scaleY)
+        ctx.drawRadialGradient(g, startCenter: .zero, startRadius: 0,
+                               endCenter: .zero, endRadius: radius, options: [])
+        ctx.restoreGState()
+    }
+
+    /// A gentle multi-sine flicker in roughly 0.7...1.15, deterministic in `phase`.
+    private func flicker() -> CGFloat {
+        let t = CGFloat(phase)
+        let v = 0.9 + 0.1 * sin(t * 0.45) + 0.05 * sin(t * 1.3 + 1.7)
+        return max(0.7, min(1.15, v))
+    }
+
+    /// A reproducible pseudo-random value in 0...1 from an integer seed (no RNG state).
+    private func hash01(_ n: Int) -> CGFloat {
+        let s = sin(CGFloat(n) * 12.9898) * 43758.5453
+        return s - floor(s)
+    }
+
+    private func lighten(_ color: NSColor, _ amount: CGFloat) -> NSColor {
+        blend(color, .white, amount)
+    }
+
+    private func darken(_ color: NSColor, _ amount: CGFloat) -> NSColor {
+        blend(color, .black, amount)
+    }
+
+    /// Linearly interpolates two colors in sRGB.
+    private func blend(_ a: NSColor, _ b: NSColor, _ t: CGFloat) -> NSColor {
+        let x = a.usingColorSpace(.sRGB) ?? a
+        let y = b.usingColorSpace(.sRGB) ?? b
+        let u = max(0, min(1, t))
+        return NSColor(srgbRed: x.redComponent + (y.redComponent - x.redComponent) * u,
+                       green: x.greenComponent + (y.greenComponent - x.greenComponent) * u,
+                       blue: x.blueComponent + (y.blueComponent - x.blueComponent) * u,
+                       alpha: x.alphaComponent + (y.alphaComponent - x.alphaComponent) * u)
     }
 }

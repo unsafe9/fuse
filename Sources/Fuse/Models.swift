@@ -71,6 +71,51 @@ enum FuseDisplay: Hashable {
     }
 }
 
+// MARK: - Fuse texture & tip effect
+
+/// The texture drawn along the fuse line. Every texture renders strictly within the
+/// configured thickness band (it only shades/overlays the existing bar), so changing
+/// texture never makes the line exceed its configured width.
+enum FuseTexture: String, Codable, CaseIterable {
+    /// A plain, flat fill (classic, minimal).
+    case solid
+    /// A braided twisted-rope look — the default, fitting the "fuse" theme.
+    case rope
+    /// A wrapped wick/cord with periodic darker bindings.
+    case wick
+
+    var displayName: String {
+        switch self {
+        case .solid: return "Solid"
+        case .rope: return "Rope"
+        case .wick: return "Wick"
+        }
+    }
+}
+
+/// The burning-tip effect at the receding end of the fuse. Effects are drawn around the
+/// tip and elongate *along* the burn axis (not across it), so they stay within roughly
+/// the thickness band and never noticeably exceed the configured width.
+enum FuseTipEffect: String, Codable, CaseIterable {
+    /// A soft glowing dot (classic).
+    case glow
+    /// A layered flame tongue licking along the fuse — the default.
+    case flame
+    /// A flame with trailing sparks/embers.
+    case spark
+
+    var displayName: String {
+        switch self {
+        case .glow: return "Glow"
+        case .flame: return "Flame"
+        case .spark: return "Sparks"
+        }
+    }
+
+    /// Whether this effect flickers and so needs a per-frame redraw.
+    var isAnimated: Bool { self != .glow }
+}
+
 // MARK: - Internal notification names
 
 extension Notification.Name {

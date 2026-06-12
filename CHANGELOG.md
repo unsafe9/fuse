@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Selectable fuse design in the Fuse settings tab: a **Texture** for the line (Solid,
+  Rope — a braided twist, default — or Wick — a wrapped cord) and a **Burning tip**
+  effect (Glow — the classic dot, Flame — a licking flame, default, or Sparks — a
+  flame with trailing embers). The flame/sparks flicker, and the live appearance
+  preview animates them. All textures and tips render within the configured thickness,
+  so the line never exceeds its set width.
 - New `:MM` minute-of-hour mark time expression (leading colon, `MM` 00–59): targets
   the next instant whose clock minute equals `MM` with seconds zero (`:00` = the top
   of the hour). Distinct from absolute `HH:MM` clock times, which have hour digits

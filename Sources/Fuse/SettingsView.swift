@@ -207,6 +207,18 @@ private struct FuseTab: View {
                         .monospacedDigit()
                 }
 
+                Picker("Texture", selection: $store.fuseTexture) {
+                    ForEach(FuseTexture.allCases, id: \.self) { texture in
+                        Text(texture.displayName).tag(texture)
+                    }
+                }
+
+                Picker("Burning tip", selection: $store.fuseTipEffect) {
+                    ForEach(FuseTipEffect.allCases, id: \.self) { effect in
+                        Text(effect.displayName).tag(effect)
+                    }
+                }
+
                 Picker("Position", selection: $store.fusePosition) {
                     ForEach(FusePosition.allCases, id: \.self) { pos in
                         Text(pos.displayName).tag(pos)
