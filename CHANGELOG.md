@@ -10,12 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Selectable fuse design in the Fuse settings tab: a **Texture** for the line (Solid,
-  Rope — a braided twist, default — or Wick — a wrapped cord) and a **Burning tip**
-  effect (Glow — the classic dot, Flame — a licking flame, default, or Sparks — a
-  flame with trailing embers). The flame/sparks flicker, and the live appearance
-  preview animates them. Textures only shade the configured-thickness line; the burning
-  tip bulges a little past it (the overlay strip carries interior headroom for this) so
-  the flame reads as fire without widening the line itself.
+  Rope — a braided twist, default — or Wick — a wrapped cord), a **Burning tip** effect
+  (Glow — the classic dot, Flame — a licking flame, default, or Sparks — a flame with
+  trailing embers), and a **Tip size** (Small / Medium, default / Large / Extra Large).
+  The flame/sparks flicker, and the live appearance preview animates them. Textures only
+  shade the configured-thickness line; the burning tip bulges a little past it (the
+  overlay strip carries interior headroom that scales with the tip size) so the flame
+  reads as fire without widening the line itself.
 - A "Reset to Defaults" button in the Fuse settings tab restores the appearance
   settings — color, thickness, texture, burning tip, and position — to their defaults,
   leaving presets, display, notifications, and power options untouched.

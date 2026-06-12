@@ -23,6 +23,7 @@ final class SettingsStore: ObservableObject {
         static let fuseThickness = "fuseThickness"
         static let fuseTexture = "fuseTexture"
         static let fuseTipEffect = "fuseTipEffect"
+        static let fuseTipSize = "fuseTipSize"
         static let fusePosition = "fusePosition"
         static let fuseDisplay = "fuseDisplay"
         static let overlayEnabled = "overlayEnabled"
@@ -47,6 +48,7 @@ final class SettingsStore: ObservableObject {
     /// Fresh-install fuse design: a braided rope with a licking flame tip.
     static let defaultTexture: FuseTexture = .rope
     static let defaultTipEffect: FuseTipEffect = .flame
+    static let defaultTipSize: FuseTipSize = .medium
     static let defaultPosition: FusePosition = .top
 
     // MARK: Published settings (feature 5)
@@ -83,6 +85,11 @@ final class SettingsStore: ObservableObject {
     /// The burning-tip effect at the receding end (glow, flame, or sparks).
     @Published var fuseTipEffect: FuseTipEffect {
         didSet { defaults.set(fuseTipEffect.rawValue, forKey: Key.fuseTipEffect) }
+    }
+
+    /// How large the burning-tip effect is drawn.
+    @Published var fuseTipSize: FuseTipSize {
+        didSet { defaults.set(fuseTipSize.rawValue, forKey: Key.fuseTipSize) }
     }
 
     /// Which screen edge the fuse is drawn on.
@@ -141,6 +148,7 @@ final class SettingsStore: ObservableObject {
         fuseThickness = defaults.object(forKey: Key.fuseThickness) as? Double ?? Self.defaultThickness
         fuseTexture = (defaults.string(forKey: Key.fuseTexture)).flatMap(FuseTexture.init(rawValue:)) ?? Self.defaultTexture
         fuseTipEffect = (defaults.string(forKey: Key.fuseTipEffect)).flatMap(FuseTipEffect.init(rawValue:)) ?? Self.defaultTipEffect
+        fuseTipSize = (defaults.string(forKey: Key.fuseTipSize)).flatMap(FuseTipSize.init(rawValue:)) ?? Self.defaultTipSize
         fusePosition = (defaults.string(forKey: Key.fusePosition)).flatMap(FusePosition.init(rawValue:)) ?? Self.defaultPosition
         fuseDisplay = (defaults.string(forKey: Key.fuseDisplay)).map(FuseDisplay.init(rawValue:)) ?? .main
         overlayEnabled = defaults.object(forKey: Key.overlayEnabled) as? Bool ?? true
@@ -173,13 +181,14 @@ final class SettingsStore: ObservableObject {
     // MARK: Reset
 
     /// Restores the Fuse appearance settings — color, thickness, texture, burning tip,
-    /// and position — to their fresh-install defaults. Leaves everything else (overlay
-    /// toggle, target display, presets, notifications, power) untouched.
+    /// tip size, and position — to their fresh-install defaults. Leaves everything else
+    /// (overlay toggle, target display, presets, notifications, power) untouched.
     func resetAppearance() {
         fuseColorHex = Self.defaultColorHex
         fuseThickness = Self.defaultThickness
         fuseTexture = Self.defaultTexture
         fuseTipEffect = Self.defaultTipEffect
+        fuseTipSize = Self.defaultTipSize
         fusePosition = Self.defaultPosition
     }
 

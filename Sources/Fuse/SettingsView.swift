@@ -219,6 +219,12 @@ private struct FuseTab: View {
                     }
                 }
 
+                Picker("Tip size", selection: $store.fuseTipSize) {
+                    ForEach(FuseTipSize.allCases, id: \.self) { size in
+                        Text(size.displayName).tag(size)
+                    }
+                }
+
                 Picker("Position", selection: $store.fusePosition) {
                     ForEach(FusePosition.allCases, id: \.self) { pos in
                         Text(pos.displayName).tag(pos)
