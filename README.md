@@ -6,6 +6,8 @@ A menubar-only timer for macOS that burns a glowing fuse along the edge of your 
 
 When a timer runs, Fuse draws a line across a full screen edge — over fullscreen apps and every Space — that shrinks as time burns down, with a glowing tip at the receding end. One glance tells you how much is left without ever leaving what you're doing.
 
+<img src="assets/screenshot.png" alt="A burning fuse along the bottom edge of the screen while a timer runs">
+
 ## Features
 
 - **Menubar-only** — no Dock icon, no window. Lives entirely in a status-bar menu (`LSUIElement`).
