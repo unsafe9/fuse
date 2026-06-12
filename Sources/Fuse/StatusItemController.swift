@@ -101,9 +101,8 @@ extension StatusItemController: NSMenuDelegate {
             let cancelItem = NSMenuItem(
                 title: "Cancel Timer",
                 action: #selector(cancelTimer),
-                keyEquivalent: "."
+                keyEquivalent: ""
             )
-            cancelItem.keyEquivalentModifierMask = .command
             cancelItem.target = self
             menu.addItem(cancelItem)
 
@@ -154,8 +153,7 @@ extension StatusItemController: NSMenuDelegate {
         }
 
         // 5. Settings
-        let settingsItem = NSMenuItem(title: "Settings\u{2026}", action: #selector(openSettings), keyEquivalent: ",")
-        settingsItem.keyEquivalentModifierMask = .command
+        let settingsItem = NSMenuItem(title: "Settings\u{2026}", action: #selector(openSettings), keyEquivalent: "")
         settingsItem.target = self
         menu.addItem(settingsItem)
 

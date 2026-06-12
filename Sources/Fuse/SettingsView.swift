@@ -225,6 +225,11 @@ private struct FuseTab: View {
                     }
                 }
                 .pickerStyle(.segmented)
+
+                HStack {
+                    Spacer()
+                    Button("Reset to Defaults") { store.resetAppearance() }
+                }
             } header: {
                 Text("Appearance")
             }

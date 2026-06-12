@@ -13,8 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Rope — a braided twist, default — or Wick — a wrapped cord) and a **Burning tip**
   effect (Glow — the classic dot, Flame — a licking flame, default, or Sparks — a
   flame with trailing embers). The flame/sparks flicker, and the live appearance
-  preview animates them. All textures and tips render within the configured thickness,
-  so the line never exceeds its set width.
+  preview animates them. Textures only shade the configured-thickness line; the burning
+  tip bulges a little past it (the overlay strip carries interior headroom for this) so
+  the flame reads as fire without widening the line itself.
+- A "Reset to Defaults" button in the Fuse settings tab restores the appearance
+  settings — color, thickness, texture, burning tip, and position — to their defaults,
+  leaving presets, display, notifications, and power options untouched.
 - New `:MM` minute-of-hour mark time expression (leading colon, `MM` 00–59): targets
   the next instant whose clock minute equals `MM` with seconds zero (`:00` = the top
   of the hour). Distinct from absolute `HH:MM` clock times, which have hour digits
@@ -26,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Removed the `⌘,` (Settings) and `⌘.` (Cancel Timer) key-equivalent hints from the
+  status-bar menu. As a menu-bar-only app with no focusable window, Fuse can't receive
+  those as global shortcuts — they only fired while the menu was already open, which
+  misleadingly implied a global hotkey. The menu items still work by click; `⌘Q` (Quit)
+  is kept as the conventional in-menu shortcut.
 - Presets are now a single ordered list of time expressions (e.g. `5m`, `1h30m`,
   `:15`, `:00`) that mixes durations and minute-of-hour marks freely, replacing the
   separate duration/deadline lists and the duration/deadline/both mode switch. The

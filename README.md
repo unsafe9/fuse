@@ -131,9 +131,10 @@ Settings open from the menu and are grouped into four tabs. Everything persists 
 - Fuse color (default pure red).
 - Thickness, 1–20 pt (default 4).
 - Texture: Solid, Rope (a braided twist, default), or Wick (a wrapped cord). Drawn within the configured thickness.
-- Burning tip: Glow (the classic dot), Flame (a licking flame, default), or Sparks (a flame with trailing embers). Flame and Sparks flicker.
+- Burning tip: Glow (the classic dot), Flame (a licking flame, default), or Sparks (a flame with trailing embers). Flame and Sparks flicker and bulge a little past the line into the screen so the fire is visible without widening the line itself.
 - Position: top, bottom, left, or right edge (default top).
 - Display: main display, all displays, or a specific screen (default main display).
+- Reset to Defaults restores color, thickness, texture, burning tip, and position to their defaults (presets, display, notifications, and power options are left alone).
 
 While the Fuse tab is open, a live overlay preview is drawn on screen so color, thickness, texture, burning tip, position, and display changes are visible immediately (the flame/sparks even animate), even with no timer running. A real running timer always takes over.
 

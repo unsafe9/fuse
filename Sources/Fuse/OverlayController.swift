@@ -230,22 +230,37 @@ final class OverlayController {
         }
     }
 
-    /// A strip of `thickness` along `position` edge of `screenFrame` (global coords).
+    /// A strip along `position` edge of `screenFrame` (global coords). The line itself is
+    /// `thickness`, but the strip is widened on its interior side by `tipPadding` so the
+    /// burning tip can bulge a bit past the line without being clipped.
     private func stripFrame(for screenFrame: NSRect, position: FusePosition, thickness: CGFloat) -> NSRect {
+        let band = thickness + FuseMetrics.tipPadding(thickness: thickness)
         switch position {
         case .top:
-            return NSRect(x: screenFrame.minX, y: screenFrame.maxY - thickness,
-                          width: screenFrame.width, height: thickness)
+            return NSRect(x: screenFrame.minX, y: screenFrame.maxY - band,
+                          width: screenFrame.width, height: band)
         case .bottom:
             return NSRect(x: screenFrame.minX, y: screenFrame.minY,
-                          width: screenFrame.width, height: thickness)
+                          width: screenFrame.width, height: band)
         case .left:
             return NSRect(x: screenFrame.minX, y: screenFrame.minY,
-                          width: thickness, height: screenFrame.height)
+                          width: band, height: screenFrame.height)
         case .right:
-            return NSRect(x: screenFrame.maxX - thickness, y: screenFrame.minY,
-                          width: thickness, height: screenFrame.height)
+            return NSRect(x: screenFrame.maxX - band, y: screenFrame.minY,
+                          width: band, height: screenFrame.height)
         }
+    }
+}
+
+// MARK: - Shared metrics
+
+/// Geometry shared between the overlay window (how tall to make the strip) and the
+/// `FuseView` (how big to draw the tip), so the two always agree.
+private enum FuseMetrics {
+    /// Extra cross-axis headroom, in points, added on the strip's interior side so the
+    /// burning tip can spill a little past the line's configured thickness.
+    static func tipPadding(thickness: CGFloat) -> CGFloat {
+        max(thickness * 1.4, 12)
     }
 }
 
@@ -285,8 +300,9 @@ private extension NSScreen {
 /// `SettingsStore.shared.fuseColor` at `fuseThickness`, overlaid with the selected
 /// `FuseTexture` (solid / rope / wick) and ending in the selected `FuseTipEffect`
 /// (glow / flame / sparks). All drawing happens in a local space where +x is the burn
-/// direction so one code path serves all four edges; the texture only shades the bar
-/// and the tip elongates along the burn axis, so neither exceeds the thickness band.
+/// direction and +y points toward the screen interior, so one code path serves all four
+/// edges. The texture only shades the `thickness` bar; the tip is allowed to bulge a
+/// little past the line into the strip's interior `FuseMetrics.tipPadding` headroom.
 /// Reads progress live from `TimerEngine.shared`; the 1/30s render timer also advances
 /// a flicker `phase` so animated tips shimmer. Set frames directly / disable implicit
 /// actions so the render timer is authoritative.
@@ -337,18 +353,24 @@ final class FuseView: NSView {
         ctx.clear(bounds)
 
         let horizontal = position.isHorizontal
-        // Length along the burning axis; the cross-axis is `thickness`.
+        // Length along the burning axis; the cross-axis is the strip (band + headroom).
         let edgeLength = horizontal ? bounds.width : bounds.height
         let filled = CGFloat(progress) * edgeLength
         guard filled > 0 else { return }
 
         ctx.saveGState()
-        // Draw in a local space where +x is the burn direction (tip at x = filled) and y
-        // spans the thickness band. Vertical edges are the transpose of horizontal — the
-        // anchor (left/bottom) and tip placement follow automatically — so one set of
-        // drawing code serves all four positions.
-        if !horizontal {
+        // Map the local frame (x = burn direction with tip at x = filled, y = 0 at the
+        // screen edge, +y toward the interior) onto the view. Each edge needs its own
+        // transform, but a single set of drawing code then serves all four positions.
+        switch position {
+        case .top:
+            ctx.concatenate(CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: bounds.height))
+        case .bottom:
+            break
+        case .left:
             ctx.concatenate(CGAffineTransform(a: 0, b: 1, c: 1, d: 0, tx: 0, ty: 0))
+        case .right:
+            ctx.concatenate(CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: bounds.width, ty: 0))
         }
 
         drawTexture(in: ctx, length: filled, cross: thickness)
@@ -469,47 +491,54 @@ final class FuseView: NSView {
         ctx.restoreGState()
     }
 
-    /// A layered flame that licks along the burn axis: a fuse-tinted halo, an amber
-    /// body, and a white-hot core. Elongated in x (compressed in y) so it stays within
-    /// the thickness band, and scaled by a gentle flicker each frame.
+    /// A layered flame at the burn point: a fuse-tinted halo, an amber body, and a
+    /// white-hot core. The hot core sits on the line and the flame bulges into the
+    /// interior `tipPadding` headroom (slightly past the configured width) and licks a
+    /// little along the burn axis. A gentle flicker scales it each frame.
     private func drawFlame(in ctx: CGContext, at tip: CGPoint, cross c: CGFloat) {
         let space = CGColorSpaceCreateDeviceRGB()
         let f = flicker()
         let clear = fuseColor.withAlphaComponent(0).cgColor
 
+        // Reach from the line center toward the interior; kept just inside the headroom
+        // so the gradient's alpha has faded out before the strip edge clips it.
+        let reach = (c / 2 + FuseMetrics.tipPadding(thickness: c) * 0.85) * f
+        let center = CGPoint(x: tip.x, y: c / 2)
+
         // Outer halo, tinted by the fuse color so the line's hue carries into the flame.
         let halo = blend(fuseColor, NSColor(srgbRed: 1, green: 0.35, blue: 0.05, alpha: 1), 0.5)
             .withAlphaComponent(0.5).cgColor
         drawRadial(ctx, space, [halo, clear], [0, 1],
-                   center: tip, radius: max(c * 1.2, 5) * f, scaleX: 1.3, scaleY: 0.5)
+                   center: center, radius: reach, scaleX: 1.3, scaleY: 1.0)
 
-        // Amber body with a hot core, licking backward from the tip along the fuse.
+        // Amber body with a hot core.
         let amber = NSColor(srgbRed: 1, green: 0.72, blue: 0.18, alpha: 0.95).cgColor
         let core = NSColor(srgbRed: 1, green: 0.98, blue: 0.85, alpha: 1).cgColor
-        drawRadial(ctx, space, [core, amber, clear], [0, 0.45, 1],
-                   center: tip, radius: max(c * 1.0, 4) * f, scaleX: 1.7, scaleY: 0.5)
+        drawRadial(ctx, space, [core, amber, clear], [0, 0.4, 1],
+                   center: center, radius: reach * 0.7, scaleX: 1.45, scaleY: 1.0)
 
-        // Tight white-hot center right at the burn point.
+        // Tight white-hot center right at the burn point on the line.
         let white = NSColor(srgbRed: 1, green: 1, blue: 0.95, alpha: 1).cgColor
         drawRadial(ctx, space, [white, clear], [0, 1],
-                   center: tip, radius: max(c * 0.45, 2), scaleX: 1.3, scaleY: 0.5)
+                   center: tip, radius: max(c * 0.7, 3.5), scaleX: 1.4, scaleY: 1.2)
     }
 
-    /// A few flickering embers scattered around the burn point, fading with their
-    /// deterministic per-frame "life" so they twinkle without random state.
+    /// A few flickering embers rising off the burn point into the interior, fading with
+    /// their deterministic per-frame "life" so they twinkle without random state.
     private func drawSparks(in ctx: CGContext, at tip: CGPoint, cross c: CGFloat) {
+        let pad = FuseMetrics.tipPadding(thickness: c)
+        let reach = c / 2 + pad * 0.85
         let ember = NSColor(srgbRed: 1, green: 0.9, blue: 0.55, alpha: 1)
-        for i in 0..<6 {
+        for i in 0..<7 {
             let seed = phase / 2 + i * 37
-            let life = hash01(seed)                              // 0..1
-            let dist = (0.3 + life) * max(c * 2.4, 8)
-            let sx = tip.x - dist                                // trail back over the cord
-            let sy = tip.y + (hash01(seed &* 3) - 0.5) * c * 0.9
-            let alpha = 1 - life
-            let r = max(c * 0.18, 0.8) * alpha
-            guard r > 0.3 else { continue }
+            let life = hash01(seed)                              // 0 = fresh, 1 = spent
+            let sx = tip.x + (hash01(seed &* 7) - 0.5) * pad * 0.7  // sway along the fuse
+            let sy = c / 2 + life * reach                          // rises into the interior
+            let alpha = (1 - life) * 0.9
+            let r = max(c * 0.22, 1) * (1 - life * 0.7)
+            guard alpha > 0.05, r > 0.4 else { continue }
             ctx.saveGState()
-            ctx.setShadow(offset: .zero, blur: r * 1.5,
+            ctx.setShadow(offset: .zero, blur: r * 1.6,
                           color: NSColor(srgbRed: 1, green: 0.55, blue: 0.1, alpha: alpha).cgColor)
             ctx.setFillColor(ember.withAlphaComponent(alpha).cgColor)
             ctx.fillEllipse(in: CGRect(x: sx - r, y: sy - r, width: r * 2, height: r * 2))
