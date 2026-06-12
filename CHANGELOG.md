@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-06-12
+
 ### Added
 
 - Selectable fuse design in the Fuse settings tab: a **Texture** for the line (Solid,
@@ -53,6 +55,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   list, and minute-of-hour marks preview as "Next :15 timer" / "ends at HH:MM". When a
   timer is running, a Stop item (showing the timer's name and remaining time) is placed
   at the top of the list.
+- Starting a timer from the Alfred workflow no longer fires a "Timer started"
+  notification — the on-screen fuse is the confirmation. Stopping a timer still shows a
+  brief "Timer stopped" banner, since there is no fuse left on screen to confirm it.
 - Keep-awake-with-lid-closed no longer requires an administrator password. It now
   disables clamshell-close sleep through the rootless `IOPMrootDomain` user client
   instead of `pmset disablesleep`, and re-asserts the state across Apple Silicon
