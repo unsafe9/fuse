@@ -110,7 +110,7 @@ final class SettingsStore: ObservableObject {
         didSet { defaults.set(preventSleep, forKey: Key.preventSleep) }
     }
 
-    /// Keep the Mac awake even with the lid closed (uses `pmset disablesleep`; admin).
+    /// Keep the Mac awake even with the lid closed (rootless clamshell-sleep disable).
     @Published var keepAwakeLidClosed: Bool {
         didSet { defaults.set(keepAwakeLidClosed, forKey: Key.keepAwakeLidClosed) }
     }

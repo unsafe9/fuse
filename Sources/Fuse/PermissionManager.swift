@@ -45,7 +45,8 @@ final class PermissionManager {
     /// Implements the warning item's click action: if `.notDetermined`, request
     /// authorization; if `.denied`, open the System Settings Notifications pane
     /// (URL "x-apple.systempreferences:com.apple.Notifications-Settings.extension",
-    /// fallback "x-apple.systempreferences:com.apple.preference.notifications").
+    /// fallback "x-apple.systempreferences:com.apple.preference.notifications") and
+    /// also bring up Fuse's own Notifications settings so the user can configure both.
     func resolve() {
         guard Bundle.main.bundleIdentifier != nil else { return }
         switch status {
@@ -59,6 +60,7 @@ final class PermissionManager {
                 }
             }
         case .denied:
+            SettingsWindowController.shared.show(selecting: .notifications)
             let primary = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!
             let fallback = URL(string: "x-apple.systempreferences:com.apple.preference.notifications")!
             if NSWorkspace.shared.open(primary) == false {

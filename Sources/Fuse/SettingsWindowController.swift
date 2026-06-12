@@ -25,8 +25,11 @@ final class SettingsWindowController: NSObject {
     }
 
     /// Shows, orders front, and focuses the Settings window, activating the app.
-    /// Idempotent.
-    func show() {
+    /// Idempotent. Pass `tab` to open directly to a specific pane.
+    func show(selecting tab: SettingsTab? = nil) {
+        if let tab {
+            SettingsNavigation.shared.selectedTab = tab
+        }
         if window == nil {
             let hostingController = NSHostingController(
                 rootView: SettingsView(store: SettingsStore.shared)

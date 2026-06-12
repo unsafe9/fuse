@@ -6,7 +6,7 @@ import os
 /// All collaborators are constructed in `applicationDidFinishLaunching`. The
 /// `TimerEngine` and `SettingsStore` are singletons; the controllers/managers are
 /// retained here for the app's lifetime. On termination the timer is cancelled so
-/// any power assertions / `pmset disablesleep` state is always restored.
+/// any power assertions / lid-close sleep state is always restored.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let log = Logger(subsystem: logSubsystem, category: "AppDelegate")
 
@@ -42,10 +42,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // Restore `pmset disablesleep` synchronously first — the async stop path triggered
-        // by cancel() would be dropped when the process exits. Doing this before cancel()
-        // runs the disable while the intent flag is still set, so cancel()'s own (async)
-        // restore is a no-op.
+        // Clear the lid-close sleep guard synchronously before cancel(), so the
+        // clamshell bit is restored even as the process exits.
         powerManager?.teardownForTermination()
         // Release power assertions and clear the running timer on exit.
         TimerEngine.shared.cancel()

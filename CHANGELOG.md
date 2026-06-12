@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   list is added to via a validating text field, deduplicated, reorderable by drag or
   up/down buttons, and its order drives the menu order. Existing duration/deadline
   presets are migrated into the unified list on first launch.
+- The menu's "Notifications disabled — click to fix" item now also opens Fuse's own
+  Notifications settings (alongside the System Settings pane) so both can be configured
+  at once.
 - Alfred workflow default keyword changed from `timer` to `fuse`.
 - Alfred workflow's empty-query default items now come from the app's configured
   presets in order (read live from the running app, or from stored settings when it's

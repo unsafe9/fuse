@@ -10,19 +10,37 @@ import AppKit
 /// All Displays, or a specific screen), overlay master toggle, show-remaining-in-menubar toggle,
 /// notification enabled + body template + sound toggle, prevent-system-sleep toggle,
 /// and keep-awake-with-lid-closed toggle.
+/// A settings tab, used to open the window directly to a given pane.
+enum SettingsTab: Hashable {
+    case general, fuse, notifications, power
+}
+
+/// Drives which tab the Settings window shows, so callers (e.g. the notification
+/// fix-it flow) can deep-link to a specific pane.
+final class SettingsNavigation: ObservableObject {
+    static let shared = SettingsNavigation()
+    @Published var selectedTab: SettingsTab = .general
+    private init() {}
+}
+
 struct SettingsView: View {
     @ObservedObject var store: SettingsStore
+    @ObservedObject private var nav = SettingsNavigation.shared
 
     var body: some View {
-        TabView {
+        TabView(selection: $nav.selectedTab) {
             GeneralTab(store: store)
                 .tabItem { Label("General", systemImage: "gearshape") }
+                .tag(SettingsTab.general)
             FuseTab(store: store)
                 .tabItem { Label("Fuse", systemImage: "flame") }
+                .tag(SettingsTab.fuse)
             NotificationsTab(store: store)
                 .tabItem { Label("Notifications", systemImage: "bell") }
+                .tag(SettingsTab.notifications)
             PowerTab(store: store)
                 .tabItem { Label("Power", systemImage: "bolt") }
+                .tag(SettingsTab.power)
         }
         .frame(width: 480)
         .fixedSize()
@@ -277,9 +295,9 @@ private struct PowerTab: View {
             Section {
                 Toggle("Prevent system idle sleep while timer runs", isOn: $store.preventSleep)
                 VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Keep Mac awake with lid closed (requires admin password)",
+                    Toggle("Keep Mac awake with lid closed",
                            isOn: $store.keepAwakeLidClosed)
-                    Text("Uses pmset disablesleep. Prompts for your password when a timer starts.")
+                    Text("Disables lid-close sleep while a timer runs. No admin password needed.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
