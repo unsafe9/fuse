@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-06-13
+
+### Added
+
+- New **"Keep display awake while timer runs"** option in the Power settings tab (on by
+  default). While a timer is active the screen no longer sleeps, so the burning fuse
+  overlay stays visible and the Mac won't dim out behind a password lock screen. It's
+  independent of "Prevent system idle sleep" — turn it off to save battery on a laptop.
+
 ## [0.1.2] - 2026-06-12
 
 ### Added
