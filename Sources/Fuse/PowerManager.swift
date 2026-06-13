@@ -12,6 +12,9 @@ import os
 /// - When `SettingsStore.shared.preventSleep` is on: holds an
 ///   `IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleSystemSleep, ...)`
 ///   for the duration, released on stop/terminate (idempotent).
+/// - When `SettingsStore.shared.preventDisplaySleep` is on: additionally holds a
+///   `kIOPMAssertionTypePreventUserIdleDisplaySleep` assertion so the screen stays on
+///   and the fuse overlay remains visible, released on the same stop/terminate paths.
 /// - When `SettingsStore.shared.keepAwakeLidClosed` is on: at timer start, disables
 ///   clamshell-close sleep via the `IOPMrootDomain` user client (selector
 ///   `kPMSetClamshellSleepState`). This needs no admin rights — the same rootless
@@ -46,6 +49,11 @@ final class PowerManager {
     private var assertionID: IOPMAssertionID = 0
     private var hasAssertion = false
 
+    /// Separate assertion that also keeps the display awake (so the fuse overlay stays
+    /// visible). Held independently of `assertionID`.
+    private var displayAssertionID: IOPMAssertionID = 0
+    private var hasDisplayAssertion = false
+
     /// True while we hold the clamshell-sleep-disabled bit (paired enable/disable).
     private var lidDisableActive = false
     /// Periodic re-assert while `lidDisableActive`, in case the bit is dropped silently.
@@ -78,6 +86,9 @@ final class PowerManager {
         if store.preventSleep {
             acquireAssertion()
         }
+        if store.preventDisplaySleep {
+            acquireDisplayAssertion()
+        }
         if store.keepAwakeLidClosed && !lidDisableActive {
             lidDisableActive = true
             // Persist the hold before flipping the bit, so a crash is always recoverable.
@@ -89,6 +100,7 @@ final class PowerManager {
 
     @objc private func timerStopped() {
         releaseAssertion()
+        releaseDisplayAssertion()
         disableLidGuard()
     }
 
@@ -96,6 +108,7 @@ final class PowerManager {
     /// synchronous, so the clamshell bit is cleared before the process exits.
     func teardownForTermination() {
         releaseAssertion()
+        releaseDisplayAssertion()
         disableLidGuard()
     }
 
@@ -121,6 +134,30 @@ final class PowerManager {
         IOPMAssertionRelease(assertionID)
         hasAssertion = false
         assertionID = 0
+    }
+
+    // MARK: - Idle-display assertion
+
+    private func acquireDisplayAssertion() {
+        guard !hasDisplayAssertion else { return }
+        let result = IOPMAssertionCreateWithName(
+            kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
+            IOPMAssertionLevel(kIOPMAssertionLevelOn),
+            "Fuse timer running" as CFString,
+            &displayAssertionID
+        )
+        if result == kIOReturnSuccess {
+            hasDisplayAssertion = true
+        } else {
+            log.error("IOPMAssertionCreateWithName (display) failed: \(result)")
+        }
+    }
+
+    private func releaseDisplayAssertion() {
+        guard hasDisplayAssertion else { return }
+        IOPMAssertionRelease(displayAssertionID)
+        hasDisplayAssertion = false
+        displayAssertionID = 0
     }
 
     // MARK: - Clamshell (lid-close) sleep

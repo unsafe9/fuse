@@ -9,7 +9,7 @@ import AppKit
 /// thickness (1–20 pt), edge position, target display (Main Display by default,
 /// All Displays, or a specific screen), overlay master toggle, show-remaining-in-menubar toggle,
 /// notification enabled + body template + sound toggle, prevent-system-sleep toggle,
-/// and keep-awake-with-lid-closed toggle.
+/// keep-display-awake toggle, and keep-awake-with-lid-closed toggle.
 /// A settings tab, used to open the window directly to a given pane.
 enum SettingsTab: Hashable {
     case general, fuse, notifications, power
@@ -321,6 +321,12 @@ private struct PowerTab: View {
         Form {
             Section {
                 Toggle("Prevent system idle sleep while timer runs", isOn: $store.preventSleep)
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Keep display awake while timer runs", isOn: $store.preventDisplaySleep)
+                    Text("Stops the screen from sleeping so the fuse overlay stays visible.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
                 VStack(alignment: .leading, spacing: 4) {
                     Toggle("Keep Mac awake with lid closed",
                            isOn: $store.keepAwakeLidClosed)

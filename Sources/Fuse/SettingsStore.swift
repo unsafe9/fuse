@@ -32,6 +32,7 @@ final class SettingsStore: ObservableObject {
         static let notificationTemplate = "notificationTemplate"
         static let notificationSound = "notificationSound"
         static let preventSleep = "preventSleep"
+        static let preventDisplaySleep = "preventDisplaySleep"
         static let keepAwakeLidClosed = "keepAwakeLidClosed"
     }
 
@@ -143,6 +144,12 @@ final class SettingsStore: ObservableObject {
         didSet { defaults.set(preventSleep, forKey: Key.preventSleep) }
     }
 
+    /// Prevent the display from sleeping while a timer is active, keeping the fuse
+    /// overlay visible. Independent of `preventSleep`.
+    @Published var preventDisplaySleep: Bool {
+        didSet { defaults.set(preventDisplaySleep, forKey: Key.preventDisplaySleep) }
+    }
+
     /// Keep the Mac awake even with the lid closed (rootless clamshell-sleep disable).
     @Published var keepAwakeLidClosed: Bool {
         didSet { defaults.set(keepAwakeLidClosed, forKey: Key.keepAwakeLidClosed) }
@@ -167,6 +174,7 @@ final class SettingsStore: ObservableObject {
         notificationTemplate = defaults.string(forKey: Key.notificationTemplate) ?? "Time's up!"
         notificationSound = defaults.object(forKey: Key.notificationSound) as? Bool ?? true
         preventSleep = defaults.object(forKey: Key.preventSleep) as? Bool ?? true
+        preventDisplaySleep = defaults.object(forKey: Key.preventDisplaySleep) as? Bool ?? true
         keepAwakeLidClosed = defaults.object(forKey: Key.keepAwakeLidClosed) as? Bool ?? false
     }
 
