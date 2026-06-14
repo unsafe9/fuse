@@ -83,7 +83,7 @@
 				<key>skipuniversalaction</key>
 				<true/>
 				<key>subtext</key>
-				<string>Start a Fuse timer: 5m, 1h30m, 25, 10:00 — optionally with a name</string>
+				<string>Start a Fuse timer: 5m, 1h30m, 25, 10:00 — add xN to repeat, a name, or !last</string>
 				<key>title</key>
 				<string>Fuse Timer</string>
 				<key>type</key>
@@ -152,8 +152,9 @@ Type the keyword (default &lt;kbd&gt;fuse&lt;/kbd&gt;) then a timer expression:
 - `25` — a bare number means minutes
 - `10:00`, `23:30` — the next occurrence of that wall-clock time
 
-Add an optional name after the expression: `5m tea`, `10:00 standup`.
-An empty query lists quick suggestions and a stop action; type `stop` (or `cancel`) to cancel the running timer.
+Add `xN` after a duration to auto-repeat it: `25m x4` runs four rounds (repeat only works with durations, not clock times).
+Add an optional name last: `5m tea`, `25m x4 pomodoro`, `10:00 standup`.
+An empty query lists quick suggestions, a Repeat-last action, and a stop action; type `stop` (or `cancel`) to cancel the running timer, or `!last` to re-start the most recent timer.
 
 Requires the Fuse menubar app; telling it auto-launches it.</string>
 	<key>uidata</key>

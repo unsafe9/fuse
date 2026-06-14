@@ -11,6 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Repeat suffix: append `xN` to a duration to auto-repeat it (`25m x4` runs four
+  rounds). A name may still follow (`25m x4 pomodoro`). The expression is passed whole
+  to the app's `start timer`, which parses the `xN` authoritatively; repeat only applies
+  to durations, not clock times.
+- Repeat-last entry: a "Repeat last timer" item in the empty-query list, and the `!last`
+  argument, both call the app's `repeat last timer` to re-start the most recent timer as
+  a single shot. Requires a Fuse app version that supports the `repeat last timer`
+  command and the `last ended at` property.
+
 ## [1.0.0] - 2026-06-12
 
 First independently-versioned release. Requires the Fuse app (any released version;

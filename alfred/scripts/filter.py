@@ -27,11 +27,13 @@ from datetime import datetime, timedelta
 FALLBACK_PRESETS = ["1m", "3m", "5m", "10m", "15m", "20m", "30m", "45m", "60m",
                     "90m", "120m", ":15", ":30", ":45", ":00"]
 STOP_WORDS = {"stop", "cancel"}
+REPEAT_LAST_WORD = "!last"  # arg passed to the action to call `repeat last timer`
 BUNDLE_ID = "com.unsafe9.fuse"
 
 DURATION_RE = re.compile(r"^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$", re.IGNORECASE)
 CLOCK_RE = re.compile(r"^(\d{1,2}):(\d{2})$")
 MARK_RE = re.compile(r"^:(\d{2})$")  # leading colon, exactly 2 digits, 00..59
+REPEAT_SUFFIX_RE = re.compile(r"^x(\d+)$", re.IGNORECASE)  # trailing "xN" repeat token
 
 
 def parse_duration(expr):
@@ -124,6 +126,27 @@ def stop_item(name="", remaining=None):
     return item(title, subtitle, "stop", autocomplete="stop", uid="fuse-stop")
 
 
+def repeat_last_item(last_ended_at="", last_started="", last_started_name=""):
+    """An item that re-starts the most recently started timer (single shot).
+
+    The app re-resolves the stored expression authoritatively and is a no-op if
+    nothing has been started yet. When the previous timer is known, the subtitle
+    leads with what will be restarted (its expression and name); `last_ended_at`
+    (HH:MM, may be empty) follows as a secondary hint.
+    """
+    if last_started:
+        what = last_started
+        if last_started_name:
+            what += f' “{last_started_name}”'
+        subtitle = f"Restart {what}"
+    else:
+        subtitle = "Re-start the most recent timer"
+    if last_ended_at:
+        subtitle += f" — last ended at {last_ended_at}"
+    return item("Repeat last timer", subtitle, REPEAT_LAST_WORD,
+                autocomplete=REPEAT_LAST_WORD, uid="fuse-repeat-last")
+
+
 def preset_item(expr):
     """A default-list item for a stored preset expression, previewing what it does."""
     secs = parse_duration(expr)
@@ -178,7 +201,8 @@ def app_is_running():
 
 
 def fetch_running_state():
-    """One osascript call returning (presets, running, remaining, name).
+    """One osascript call returning (presets, running, remaining, name,
+    last_ended_at, last_started, last_started_name).
 
     Joins presets with the unit separator and separates scalar fields with it
     too, so the blob parses unambiguously. Returns None on any failure.
@@ -189,7 +213,9 @@ def fetch_running_state():
         '  set ps to presets as text\n'
         '  set AppleScript\'s text item delimiters to ""\n'
         '  return ps & "\x1e" & (running as text) & "\x1e" & '
-        '(remaining as text) & "\x1e" & (timer name)\n'
+        '(remaining as text) & "\x1e" & (timer name) & "\x1e" & '
+        '(last ended at) & "\x1e" & (last started) & "\x1e" & '
+        '(last started name)\n'
         'end tell'
     )
     try:
@@ -199,16 +225,18 @@ def fetch_running_state():
             return None
         blob = out.stdout.rstrip("\n")
         fields = blob.split("\x1e")
-        if len(fields) < 4:
+        if len(fields) < 7:
             return None
-        presets_raw, running_raw, remaining_raw, name = fields[0], fields[1], fields[2], fields[3]
+        (presets_raw, running_raw, remaining_raw, name, last_ended,
+         last_started, last_started_name) = fields[:7]
         presets = [p for p in presets_raw.split(US) if p] if presets_raw else []
         running = running_raw.strip().lower() == "true"
         try:
             remaining = int(remaining_raw.strip())
         except ValueError:
             remaining = 0
-        return presets, running, remaining, name.strip()
+        return (presets, running, remaining, name.strip(), last_ended.strip(),
+                last_started.strip(), last_started_name.strip())
     except Exception:
         return None
 
@@ -233,25 +261,51 @@ def presets_from_defaults():
 
 
 def default_items():
-    """Build the empty-query item list: optional Stop item, then presets in order."""
+    """Build the empty-query item list: optional Stop item, a Repeat-last item, then
+    presets in order."""
     if app_is_running():
         state = fetch_running_state()
         if state is not None:
-            presets, running, remaining, name = state
+            (presets, running, remaining, name, last_ended,
+             last_started, last_started_name) = state
             if not presets:
                 presets = FALLBACK_PRESETS
             items = []
             if running:
                 items.append(stop_item(name, remaining))
+            items.append(repeat_last_item(last_ended, last_started,
+                                          last_started_name))
             items.extend(preset_item(expr) for expr in presets)
             return items
         # osascript failed despite app running: degrade gracefully.
 
     presets = presets_from_defaults() or FALLBACK_PRESETS
-    return [preset_item(expr) for expr in presets]
+    return [repeat_last_item()] + [preset_item(expr) for expr in presets]
 
 
 # --- Typed query preview ----------------------------------------------------
+
+def split_repeat_and_name(rest):
+    """Split the text after EXPR into (repeat_count, name).
+
+    `rest` is everything after the time expression. A leading "xN" token (the same
+    repeat suffix the app parses) is pulled off as the repeat count; the remainder is
+    the name. Returns (None, name) when there is no repeat token.
+    """
+    rest = rest.strip()
+    if not rest:
+        return None, ""
+    head, _, tail = rest.partition(" ")
+    m = REPEAT_SUFFIX_RE.match(head)
+    if m:
+        return int(m.group(1)), tail.strip()
+    return None, rest
+
+
+def repeat_suffix(count):
+    """A " ×N" badge for the preview title when repeating (count >= 2), else ""."""
+    return f" ×{count}" if count and count >= 2 else ""
+
 
 def build(query):
     query = (query or "").strip()
@@ -261,16 +315,25 @@ def build(query):
     lowered = query.lower()
     if lowered in STOP_WORDS:
         return [stop_item()]
+    if lowered == REPEAT_LAST_WORD:
+        if app_is_running():
+            state = fetch_running_state()
+            if state is not None:
+                _, _, _, _, last_ended, last_started, last_started_name = state
+                return [repeat_last_item(last_ended, last_started,
+                                         last_started_name)]
+        return [repeat_last_item()]
 
     parts = query.split(None, 1)
     expr = parts[0]
-    name = parts[1].strip() if len(parts) > 1 else ""
+    rest = parts[1] if len(parts) > 1 else ""
+    repeat, name = split_repeat_and_name(rest)
 
     secs = parse_duration(expr)
     if secs is not None and secs > 0:
         end = datetime.now() + timedelta(seconds=secs)
         return [item(
-            f"Start {human_duration(secs)} timer",
+            f"Start {human_duration(secs)} timer{repeat_suffix(repeat)}",
             f"{named_suffix(name)}ends at {end.strftime('%H:%M')}",
             query, uid="fuse-preview")]
 
@@ -299,7 +362,7 @@ def build(query):
 
     return [item(
         "Unrecognised timer",
-        "Try 5m, 1h30m, 45s, 25 (minutes), :15 (mark), or 10:00 — optionally with a name",
+        "Try 5m, 1h30m, 45s, 25 (minutes), :15 (mark), or 10:00 — add ×N (x4) to repeat, plus a name",
         query, valid=False, uid="fuse-invalid")]
 
 

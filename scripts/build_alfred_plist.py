@@ -29,9 +29,12 @@ doc = {
         "- `5m`, `1h`, `1h30m`, `45s` — durations\n"
         "- `25` — a bare number means minutes\n"
         "- `10:00`, `23:30` — the next occurrence of that wall-clock time\n\n"
-        "Add an optional name after the expression: `5m tea`, `10:00 standup`.\n"
-        "An empty query lists quick suggestions and a stop action; type `stop` "
-        "(or `cancel`) to cancel the running timer.\n\n"
+        "Add `xN` after a duration to auto-repeat it: `25m x4` runs four rounds "
+        "(repeat only works with durations, not clock times).\n"
+        "Add an optional name last: `5m tea`, `25m x4 pomodoro`, `10:00 standup`.\n"
+        "An empty query lists quick suggestions, a Repeat-last action, and a stop "
+        "action; type `stop` (or `cancel`) to cancel the running timer, or `!last` "
+        "to re-start the most recent timer.\n\n"
         "Requires the Fuse menubar app; telling it auto-launches it."
     ),
     "variables": {},
@@ -71,7 +74,7 @@ doc = {
                 "scriptargtype": 1,
                 "scriptfile": "",
                 "skipuniversalaction": True,
-                "subtext": "Start a Fuse timer: 5m, 1h30m, 25, 10:00 — optionally with a name",
+                "subtext": "Start a Fuse timer: 5m, 1h30m, 25, 10:00 — add xN to repeat, a name, or !last",
                 "title": "Fuse Timer",
                 "type": 11,
                 "withspace": True,
