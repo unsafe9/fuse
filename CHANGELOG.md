@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-06-15
+
+### Changed
+
+- **Much lower CPU usage while a timer runs.** The burning-fuse overlay is now
+  drawn with GPU-composited Core Animation layers instead of a 30fps CPU render
+  loop, and the menu-bar countdown updates only when the displayed time changes.
+  Together these cut CPU use during a running timer by roughly 5–6× (about 14%
+  → 2.5% in testing), with no visible change to the fuse or the countdown.
+
 ## [0.2.1] - 2026-06-14
 
 ### Added
