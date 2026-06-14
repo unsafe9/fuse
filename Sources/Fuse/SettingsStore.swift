@@ -25,6 +25,7 @@ final class SettingsStore: ObservableObject {
         static let fuseTipEffect = "fuseTipEffect"
         static let fuseTipScale = "fuseTipScale"
         static let fusePosition = "fusePosition"
+        static let notchHandling = "notchHandling"
         static let fuseDisplay = "fuseDisplay"
         static let overlayEnabled = "overlayEnabled"
         static let showRemainingInMenuBar = "showRemainingInMenuBar"
@@ -59,6 +60,8 @@ final class SettingsStore: ObservableObject {
     static let defaultTexture: FuseTexture = .rope
     static let defaultTipEffect: FuseTipEffect = .flame
     static let defaultPosition: FusePosition = .top
+    /// Fresh-install: draw the top fuse across the very top edge (over the notch).
+    static let defaultNotchHandling: NotchHandling = .over
     /// Burning-tip size as a multiplier on its base size (1× = the baseline).
     static let defaultTipScale: Double = 1.0
     static let minTipScale: Double = 0.5
@@ -125,6 +128,12 @@ final class SettingsStore: ObservableObject {
     /// Which screen edge the fuse is drawn on.
     @Published var fusePosition: FusePosition {
         didSet { defaults.set(fusePosition.rawValue, forKey: Key.fusePosition) }
+    }
+
+    /// For the `top` position on a notched MacBook: whether to draw over, below, or
+    /// skip the notch. No effect on other positions or on displays without a notch.
+    @Published var notchHandling: NotchHandling {
+        didSet { defaults.set(notchHandling.rawValue, forKey: Key.notchHandling) }
     }
 
     /// Target display(s): main (default), all, or a specific display. A configured
@@ -240,6 +249,7 @@ final class SettingsStore: ObservableObject {
         fuseTipEffect = (defaults.string(forKey: Key.fuseTipEffect)).flatMap(FuseTipEffect.init(rawValue:)) ?? Self.defaultTipEffect
         fuseTipScale = defaults.object(forKey: Key.fuseTipScale) as? Double ?? Self.defaultTipScale
         fusePosition = (defaults.string(forKey: Key.fusePosition)).flatMap(FusePosition.init(rawValue:)) ?? Self.defaultPosition
+        notchHandling = (defaults.string(forKey: Key.notchHandling)).flatMap(NotchHandling.init(rawValue:)) ?? Self.defaultNotchHandling
         fuseDisplay = (defaults.string(forKey: Key.fuseDisplay)).map(FuseDisplay.init(rawValue:)) ?? .main
         overlayEnabled = defaults.object(forKey: Key.overlayEnabled) as? Bool ?? true
         showRemainingInMenuBar = defaults.object(forKey: Key.showRemainingInMenuBar) as? Bool ?? true
@@ -281,7 +291,7 @@ final class SettingsStore: ObservableObject {
     // MARK: Reset
 
     /// Restores the Fuse appearance settings — color, thickness, texture, burning tip,
-    /// tip size, and position — to their fresh-install defaults. Leaves everything else
+    /// tip size, position, and notch offset — to their fresh-install defaults. Leaves everything else
     /// (overlay toggle, target display, presets, notifications, power) untouched.
     func resetAppearance() {
         fuseColorHex = Self.defaultColorHex
@@ -290,6 +300,7 @@ final class SettingsStore: ObservableObject {
         fuseTipEffect = Self.defaultTipEffect
         fuseTipScale = Self.defaultTipScale
         fusePosition = Self.defaultPosition
+        notchHandling = Self.defaultNotchHandling
     }
 
     // MARK: Color helpers

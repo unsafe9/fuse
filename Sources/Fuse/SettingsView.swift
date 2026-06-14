@@ -250,7 +250,11 @@ private struct FuseTab: View {
                         .frame(width: 40, alignment: .trailing)
                         .monospacedDigit()
                 }
+            } header: {
+                Text("Appearance")
+            }
 
+            Section {
                 Picker("Position", selection: $store.fusePosition) {
                     ForEach(FusePosition.allCases, id: \.self) { pos in
                         Text(pos.displayName).tag(pos)
@@ -258,28 +262,17 @@ private struct FuseTab: View {
                 }
                 .pickerStyle(.segmented)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Flare near the end", isOn: $store.flareIntensifyEnabled)
-                    Text("Near the end, the fuse shifts toward the warning color. The end time stays the same.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    HStack {
-                        Text("Warning color")
-                        Spacer()
-                        ColorPicker("", selection: flareColorBinding)
-                            .labelsHidden()
-                            .disabled(!store.flareIntensifyEnabled)
+                if store.fusePosition == .top {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Picker("Notch", selection: $store.notchHandling) {
+                            ForEach(NotchHandling.allCases, id: \.self) { mode in
+                                Text(mode.displayName).tag(mode)
+                            }
+                        }
+                        Text("On a notched MacBook: draw below the notch, or skip it so the fuse jumps across the camera housing instead of hiding behind it.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
-                    HStack {
-                        Text("Flare size")
-                        Slider(value: $store.flareEnlargeScale,
-                               in: SettingsStore.minFlareScale...SettingsStore.maxFlareScale,
-                               step: 0.1)
-                        Text(String(format: "%.1f×", store.flareEnlargeScale))
-                            .frame(width: 40, alignment: .trailing)
-                            .monospacedDigit()
-                    }
-                    .disabled(!store.flareIntensifyEnabled)
                 }
 
                 HStack {
@@ -287,7 +280,35 @@ private struct FuseTab: View {
                     Button("Reset to Defaults") { store.resetAppearance() }
                 }
             } header: {
-                Text("Appearance")
+                Text("Placement")
+            }
+
+            Section {
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Flare near the end", isOn: $store.flareIntensifyEnabled)
+                    Text("Near the end, the fuse shifts toward the warning color. The end time stays the same.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                HStack {
+                    Text("Warning color")
+                    Spacer()
+                    ColorPicker("", selection: flareColorBinding)
+                        .labelsHidden()
+                        .disabled(!store.flareIntensifyEnabled)
+                }
+                HStack {
+                    Text("Flare size")
+                    Slider(value: $store.flareEnlargeScale,
+                           in: SettingsStore.minFlareScale...SettingsStore.maxFlareScale,
+                           step: 0.1)
+                    Text(String(format: "%.1f×", store.flareEnlargeScale))
+                        .frame(width: 40, alignment: .trailing)
+                        .monospacedDigit()
+                }
+                .disabled(!store.flareIntensifyEnabled)
+            } header: {
+                Text("Near the end")
             }
 
             Section {

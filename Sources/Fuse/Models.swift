@@ -89,6 +89,31 @@ enum FusePosition: String, Codable, CaseIterable {
     }
 }
 
+// MARK: - Notch handling
+
+/// How the `top` fuse deals with a MacBook's notch. Only meaningful for the top edge
+/// on a display that actually has a notch; on other edges / notchless displays every
+/// case draws the same full-width strip.
+enum NotchHandling: String, Codable, CaseIterable {
+    /// Draw the strip across the very top edge as-is — the middle sits behind the notch.
+    case over
+    /// Drop the strip below the notch (offset by the top safe-area inset) so the whole
+    /// line is visible, just lower.
+    case below
+    /// Keep the strip at the top edge but skip the notch's width: the line fills up to
+    /// the notch, then jumps across it and continues on the far side, so the notch never
+    /// covers any of it.
+    case skip
+
+    var displayName: String {
+        switch self {
+        case .over: return "Draw over the notch"
+        case .below: return "Draw below the notch"
+        case .skip: return "Skip the notch"
+        }
+    }
+}
+
 // MARK: - Fuse display
 
 /// Which display(s) the fuse overlay is drawn on.

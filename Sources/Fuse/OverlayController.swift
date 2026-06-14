@@ -158,9 +158,16 @@ final class OverlayController {
         let flareIntensifyEnabled = SettingsStore.shared.flareIntensifyEnabled
         let flareEnlargeScale = CGFloat(SettingsStore.shared.flareEnlargeScale)
         let flareColor = SettingsStore.shared.flareColor
+        // Notch handling only applies to the top edge; off-edge it's a no-op.
+        let notch = position == .top ? SettingsStore.shared.notchHandling : .over
+        // Below-notch drops the strip into the menu-bar area, where (unlike the top-edge
+        // case) the tip's upward spill is on screen. Add headroom above the line so it
+        // isn't clipped at the strip's top edge.
+        let topHeadroom = notch == .below ? FuseMetrics.tipPadding(thickness: thickness, scale: tipScale) : 0
 
         for screen in targetScreens() {
-            let frame = stripFrame(for: screen.frame, position: position, thickness: thickness, scale: tipScale)
+            let gap = notch == .skip ? notchGap(for: screen) : nil
+            let frame = stripFrame(for: screen, position: position, thickness: thickness, scale: tipScale, belowNotch: notch == .below, topHeadroom: topHeadroom)
             let window = OverlayWindow(contentRect: frame)
             let view = FuseView(frame: NSRect(origin: .zero, size: frame.size))
             view.position = position
@@ -173,6 +180,8 @@ final class OverlayController {
             view.flareEnlargeScale = flareEnlargeScale
             view.flareColor = flareColor
             view.flareLeadSeconds = SettingsStore.flareLeadSeconds
+            view.notchGap = gap
+            view.topHeadroom = topHeadroom
             view.setProgress(renderProgress)
             window.contentView = view
             window.orderFrontRegardless()
@@ -275,15 +284,34 @@ final class OverlayController {
         return NSScreen.screens.first { $0.displayID == mainID } ?? NSScreen.main
     }
 
-    /// A strip along `position` edge of `screenFrame` (global coords). The line itself is
+    /// The notch's horizontal gap on `screen`, in the overlay's burn-axis local x
+    /// (0 = left screen edge): `start` is where the camera housing begins, `width` its
+    /// extent. Returns nil on a display without a notch. Used by the "skip the notch"
+    /// top mode so the fuse jumps across the housing instead of hiding behind it.
+    private func notchGap(for screen: NSScreen) -> (start: CGFloat, width: CGFloat)? {
+        guard let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea else { return nil }
+        let start = left.maxX - screen.frame.minX
+        let width = right.minX - left.maxX
+        guard width > 0 else { return nil }
+        return (start, width)
+    }
+
+    /// A strip along `position` edge of the screen (global coords). The line itself is
     /// `thickness`, but the strip is widened on its interior side by `tipPadding` so the
-    /// burning tip can bulge a bit past the line without being clipped.
-    private func stripFrame(for screenFrame: NSRect, position: FusePosition, thickness: CGFloat, scale: CGFloat) -> NSRect {
+    /// burning tip can bulge a bit past the line without being clipped. When `belowNotch`
+    /// is set, the top strip is dropped by the screen's top safe-area inset so a notched
+    /// MacBook draws the line just under the notch (0 inset elsewhere leaves it unchanged).
+    /// `topHeadroom` extends the top strip *above* the line (the below-notch case) so the
+    /// tip's upward spill into the menu-bar area isn't clipped; `FuseView.topHeadroom`
+    /// pushes the line down to match.
+    private func stripFrame(for screen: NSScreen, position: FusePosition, thickness: CGFloat, scale: CGFloat, belowNotch: Bool, topHeadroom: CGFloat) -> NSRect {
+        let screenFrame = screen.frame
         let band = thickness + FuseMetrics.tipPadding(thickness: thickness, scale: scale)
         switch position {
         case .top:
-            return NSRect(x: screenFrame.minX, y: screenFrame.maxY - band,
-                          width: screenFrame.width, height: band)
+            let inset = belowNotch ? screen.safeAreaInsets.top : 0
+            return NSRect(x: screenFrame.minX, y: screenFrame.maxY - inset - band,
+                          width: screenFrame.width, height: band + topHeadroom)
         case .bottom:
             return NSRect(x: screenFrame.minX, y: screenFrame.minY,
                           width: screenFrame.width, height: band)
@@ -532,6 +560,14 @@ final class FuseView: NSView {
     var flareColor: NSColor = .orange
     /// Seconds before the end at which flare ramps in (clamped to `total/2`).
     var flareLeadSeconds: TimeInterval = 30
+    /// When skipping the notch (top mode, notched display): the camera-housing gap in
+    /// burn-axis local x (`start` = gap left edge, `width` = its extent). The fuse fills
+    /// up to the gap, jumps it, and continues past it. nil = draw one continuous line.
+    var notchGap: (start: CGFloat, width: CGFloat)?
+    /// Extra strip headroom above the line (below-notch top mode). The line is pushed down
+    /// by this much so the burning tip's upward spill renders into the menu-bar area
+    /// instead of being clipped at the strip's top edge. 0 in every other case.
+    var topHeadroom: CGFloat = 0
 
     private var progress: Double = 1
     /// Remaining seconds, fed by the render timer; drives the flare ramp. Starts at
@@ -589,15 +625,21 @@ final class FuseView: NSView {
         guard bounds.contains(viewPoint) else { return false }
 
         let edgeLength = position.isHorizontal ? bounds.width : bounds.height
-        let filled = CGFloat(progress) * edgeLength
-        guard filled > 0 else { return false }
-
         let pad = FuseMetrics.tipPadding(thickness: thickness, scale: tipScale)
         let point = drawingPoint(from: viewPoint)
-        return point.x >= 0
-            && point.x <= min(edgeLength, filled + pad)
-            && point.y >= 0
-            && point.y <= thickness + pad
+        guard point.x >= 0, point.y >= 0, point.y <= thickness + pad else { return false }
+
+        if let gap = notchGap {
+            let filled = CGFloat(progress) * (edgeLength - gap.width)
+            guard filled > 0 else { return false }
+            if point.x <= gap.start { return point.x <= filled + pad }
+            if point.x < gap.start + gap.width { return false }  // inside the notch gap
+            return point.x - gap.width <= filled + pad           // far side: map out the gap
+        }
+
+        let filled = CGFloat(progress) * edgeLength
+        guard filled > 0 else { return false }
+        return point.x <= min(edgeLength, filled + pad)
     }
 
     override var isFlipped: Bool { false }
@@ -608,8 +650,11 @@ final class FuseView: NSView {
 
         let horizontal = position.isHorizontal
         // Length along the burning axis; the cross-axis is the strip (band + headroom).
+        // When skipping the notch, the gap's width is removed from the usable length so
+        // the line's pace stays constant — it just jumps the housing.
         let edgeLength = horizontal ? bounds.width : bounds.height
-        let filled = CGFloat(progress) * edgeLength
+        let effectiveLength = notchGap.map { edgeLength - $0.width } ?? edgeLength
+        let filled = CGFloat(progress) * effectiveLength
         guard filled > 0 else { return }
 
         // Flare (F6): near the end, tint the fuse toward `flareColor` and amplify the tip.
@@ -630,7 +675,9 @@ final class FuseView: NSView {
         // transform, but a single set of drawing code then serves all four positions.
         switch position {
         case .top:
-            ctx.concatenate(CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: bounds.height))
+            // ty drops by topHeadroom so local y=0 (the line's edge) sits below the strip's
+            // top, leaving room above for the tip's upward spill (below-notch mode).
+            ctx.concatenate(CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: bounds.height - topHeadroom))
         case .bottom:
             break
         case .left:
@@ -639,15 +686,39 @@ final class FuseView: NSView {
             ctx.concatenate(CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: bounds.width, ty: 0))
         }
 
-        drawTexture(in: ctx, length: filled, cross: thickness)
-        drawTip(in: ctx, at: CGPoint(x: filled, y: thickness / 2), cross: thickness, intensify: intensify)
+        if let gap = notchGap {
+            drawLineSkippingNotch(in: ctx, filled: filled, gap: gap, intensify: intensify)
+        } else {
+            drawTexture(in: ctx, length: filled, cross: thickness)
+            drawTip(in: ctx, at: CGPoint(x: filled, y: thickness / 2), cross: thickness, intensify: intensify)
+        }
+        ctx.restoreGState()
+    }
+
+    /// Draws the line in two pieces around the notch gap: everything up to the gap, then
+    /// (once past it) the remainder shifted across the gap's width, with the burning tip
+    /// on whichever piece is currently the leading end.
+    private func drawLineSkippingNotch(in ctx: CGContext, filled: CGFloat, gap: (start: CGFloat, width: CGFloat), intensify: CGFloat) {
+        if filled <= gap.start {
+            drawTexture(in: ctx, length: filled, cross: thickness)
+            drawTip(in: ctx, at: CGPoint(x: filled, y: thickness / 2), cross: thickness, intensify: intensify)
+            return
+        }
+        // Fill the segment left of the notch (no tip — it isn't the leading end), then
+        // continue on the far side of the gap.
+        drawTexture(in: ctx, length: gap.start, cross: thickness)
+        let secondLen = filled - gap.start
+        ctx.saveGState()
+        ctx.translateBy(x: gap.start + gap.width, y: 0)
+        drawTexture(in: ctx, length: secondLen, cross: thickness)
+        drawTip(in: ctx, at: CGPoint(x: secondLen, y: thickness / 2), cross: thickness, intensify: intensify)
         ctx.restoreGState()
     }
 
     private func drawingPoint(from viewPoint: NSPoint) -> NSPoint {
         switch position {
         case .top:
-            return NSPoint(x: viewPoint.x, y: bounds.height - viewPoint.y)
+            return NSPoint(x: viewPoint.x, y: bounds.height - topHeadroom - viewPoint.y)
         case .bottom:
             return viewPoint
         case .left:

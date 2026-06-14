@@ -155,6 +155,7 @@ Settings open from the menu and are grouped into four tabs. Everything persists 
 - Burning tip: Glow (the classic dot), Flame (a licking flame, default), or Sparks (a flame with trailing embers). Flame and Sparks flicker and bulge a little past the line into the screen so the fire is visible without widening the line itself.
 - Tip size: a 0.5×–3× slider (default 1×) that scales the burning tip (and the room it has to bulge into the screen).
 - Position: top, bottom, left, or right edge (default top).
+- Notch (top position only, default *Draw over the notch*): on a notched MacBook, choose *Draw below the notch* to drop the line just under the notch, or *Skip the notch* to keep it at the top edge but jump it across the camera housing so the middle isn't covered.
 - Flare near the end (default on): the fuse shifts toward a warning color in the final seconds, without changing the end time. Pick the warning color with the adjacent color well (orange by default), and set the "Flare size" slider (1×–3×, default 2×) for how much the flame grows toward the end.
 - Display: main display, all displays, or a specific screen (default main display).
 - Reset to Defaults restores color, thickness, texture, burning tip, and position to their defaults (presets, display, notifications, and power options are left alone).
