@@ -3,6 +3,9 @@ import Combine
 import CoreGraphics
 import os
 
+/// Shared device RGB color space for all offscreen bakes/gradients (immutable, reusable).
+private let deviceRGB = CGColorSpaceCreateDeviceRGB()
+
 /// Draws and manages the burning-fuse overlay (feature 3, CORE).
 ///
 /// Observes `.fuseTimerStarted` / `.fuseTimerCompleted` / `.fuseTimerCancelled`,
@@ -20,11 +23,13 @@ import os
 /// - frame = a strip of the configured `fuseThickness` along the configured edge of
 ///   `screen.frame` in global coordinates (top strip intentionally covers the menu bar).
 ///
-/// The contained `FuseView` draws the line whose filled length is
-/// `TimerEngine.shared.progress × edgeLength`, anchored at the left (horizontal) or
-/// bottom (vertical), with a brighter glowing dot at the receding tip. A 1/30s
-/// `Timer` in `.common` mode reads `progress` and redraws; it is invalidated when
-/// the overlay is hidden. No implicit Core Animation animations.
+/// The contained `FuseView` renders the line whose filled length is
+/// `TimerEngine.shared.progress × edgeLength` as a Core Animation layer tree, anchored
+/// at the left (horizontal) or bottom (vertical), with a brighter glowing tip at the
+/// receding end. There is no per-frame CPU render loop: per-frame compositing is the
+/// GPU's job, and the controller only does light work on the engine's 0.25s
+/// `.fuseTimerTick` — pushing the new progress/remaining into each view (animated over
+/// 0.25s) and running the hover-tooltip hit test.
 ///
 /// OWNER: overlay. Compiling stub.
 final class OverlayController {
@@ -33,8 +38,6 @@ final class OverlayController {
     /// One overlay window per target screen while visible.
     private var windows: [OverlayWindow] = []
     private var hoverTooltip: FuseHoverTooltipWindow?
-    /// 1/30s render timer; non-nil only while the overlay is visible.
-    private var renderTimer: Timer?
     private var settingsCancellable: AnyCancellable?
 
     /// True while the Settings "Fuse" tab requests a static preview. A real running
@@ -53,6 +56,8 @@ final class OverlayController {
                        name: .fuseTimerCompleted, object: nil)
         nc.addObserver(self, selector: #selector(timerStopped),
                        name: .fuseTimerCancelled, object: nil)
+        nc.addObserver(self, selector: #selector(timerTicked),
+                       name: .fuseTimerTick, object: nil)
         nc.addObserver(self, selector: #selector(previewBegan),
                        name: .fusePreviewBegan, object: nil)
         nc.addObserver(self, selector: #selector(previewEnded),
@@ -83,6 +88,30 @@ final class OverlayController {
         // A running timer always wins; once it ends, fall back to a preview if one is
         // still requested, otherwise hide.
         refresh()
+    }
+
+    /// The engine's 0.25s tick: while visible & running, push the new progress/remaining
+    /// into each view (animated over 0.25s so the bar/tip glide between ticks) and run the
+    /// hover-tooltip hit test. This replaces the old 1/30s CPU render loop — flicker/spark
+    /// run as GPU-side CA animations, so this is the only per-tick app work.
+    @objc private func timerTicked() {
+        guard isVisible, isRunning else { return }
+        let progress = TimerEngine.shared.progress
+        let remaining = TimerEngine.shared.remaining
+        for window in windows {
+            (window.contentView as? FuseView)?.tick(progress: progress, remaining: remaining)
+        }
+
+        let mouseLocation = NSEvent.mouseLocation
+        let hoveringFuse = windows.contains { window in
+            guard let view = window.contentView as? FuseView else { return false }
+            return view.containsVisibleFuse(at: mouseLocation, in: window)
+        }
+        if let session = TimerEngine.shared.session, hoveringFuse {
+            showHoverTooltip(session: session, remaining: remaining, at: mouseLocation)
+        } else {
+            hideHoverTooltip()
+        }
     }
 
     @objc private func previewBegan() {
@@ -137,7 +166,6 @@ final class OverlayController {
     private func refresh() {
         if isVisible {
             rebuildWindows()
-            startRenderTimer()
         } else {
             teardown()
         }
@@ -187,12 +215,9 @@ final class OverlayController {
             window.orderFrontRegardless()
             windows.append(window)
         }
-
-        startRenderTimer()
     }
 
     private func teardown() {
-        stopRenderTimer()
         hideHoverTooltip()
         teardownWindows()
     }
@@ -205,43 +230,7 @@ final class OverlayController {
         windows.removeAll()
     }
 
-    // MARK: - Render timer (1/30s, only while visible)
-
-    private func startRenderTimer() {
-        guard renderTimer == nil, !windows.isEmpty else { return }
-        let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-            self?.tickRender()
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        renderTimer = timer
-    }
-
-    private func stopRenderTimer() {
-        renderTimer?.invalidate()
-        renderTimer = nil
-    }
-
-    private func tickRender() {
-        let progress = renderProgress
-        let remaining = isRunning ? TimerEngine.shared.remaining : .infinity
-        let mouseLocation = NSEvent.mouseLocation
-        for window in windows {
-            (window.contentView as? FuseView)?.tick(progress: progress, remaining: remaining)
-        }
-
-        let hoveringFuse = windows.contains { window in
-            guard let view = window.contentView as? FuseView else { return false }
-            return view.containsVisibleFuse(at: mouseLocation, in: window)
-        }
-
-        if isRunning,
-           let session = TimerEngine.shared.session,
-           hoveringFuse {
-            showHoverTooltip(session: session, remaining: TimerEngine.shared.remaining, at: mouseLocation)
-        } else {
-            hideHoverTooltip()
-        }
-    }
+    // MARK: - Hover tooltip
 
     private func showHoverTooltip(session: TimerSession, remaining: TimeInterval, at point: NSPoint) {
         let tooltip = hoverTooltip ?? FuseHoverTooltipWindow()
@@ -530,18 +519,22 @@ private extension NSScreen {
 
 // MARK: - Fuse view
 
-/// Layer-backed view rendering the fuse line, its chosen texture, and its burning tip.
+/// Layer-backed view rendering the fuse line, its chosen texture, and its burning tip as
+/// a Core Animation layer tree (GPU-composited).
 ///
-/// Draws a filled bar of length `progress × edgeLength` from the anchored end, in
-/// `SettingsStore.shared.fuseColor` at `fuseThickness`, overlaid with the selected
-/// `FuseTexture` (solid / rope / wick) and ending in the selected `FuseTipEffect`
-/// (glow / flame / sparks). All drawing happens in a local space where +x is the burn
-/// direction and +y points toward the screen interior, so one code path serves all four
-/// edges. The texture only shades the `thickness` bar; the tip is allowed to bulge a
-/// little past the line into the strip's interior `FuseMetrics.tipPadding` headroom.
-/// Reads progress live from `TimerEngine.shared`; the 1/30s render timer also advances
-/// a flicker `phase` so animated tips shimmer. Set frames directly / disable implicit
-/// actions so the render timer is authoritative.
+/// A filled bar of length `progress × edgeLength` is masked out of a once-baked texture
+/// image, ending in the selected `FuseTipEffect` (glow / flame / sparks). All layers are
+/// built in a local space where +x is the burn direction and +y points toward the screen
+/// interior; a single 4-edge `CGAffineTransform` on the root container maps that space to
+/// each of top/bottom/left/right, so one code path serves all four edges. The texture
+/// only shades the `thickness` bar; the tip is allowed to bulge a little past the line
+/// into the strip's interior `FuseMetrics.tipPadding` headroom.
+///
+/// There is NO per-frame `draw(_:)`. The texture bar and tip/flare sprites are baked into
+/// `CGImage`s once (and re-baked only when color/thickness/texture/effect/edge-length or
+/// the backing scale change). Progress changes glide the progress mask + tip position via
+/// 0.25s `CABasicAnimation`s on the engine tick; flicker/spark run as infinite GPU-side
+/// CA animations (zero CPU); flare opacity/scale update on the tick.
 ///
 /// OWNER: overlay.
 final class FuseView: NSView {
@@ -570,15 +563,52 @@ final class FuseView: NSView {
     var topHeadroom: CGFloat = 0
 
     private var progress: Double = 1
-    /// Remaining seconds, fed by the render timer; drives the flare ramp. Starts at
-    /// `.infinity` so flare never fires before the first tick (and during preview).
+    /// Remaining seconds, fed by the tick; drives the flare ramp. Starts at `.infinity`
+    /// so flare never fires before the first tick (and during preview).
     private var remaining: TimeInterval = .infinity
-    /// Monotonic frame counter driving tip flicker; advanced by the render timer.
-    private var phase: Int = 0
+
+    /// Duration of the progress/tip glide between 0.25s engine ticks.
+    private let tickDuration: CFTimeInterval = 0.25
+
+    // MARK: - Layer tree
+
+    /// Root container carrying the 4-edge affine transform; all sublayers live in burn-axis
+    /// local coords. Built lazily once attached to a window (so the backing scale is known).
+    private var root: CALayer?
+    /// The baked full-length `flareColor` texture, crossfaded over the base line near the
+    /// end (F6). Only built when flare is enabled; nil otherwise.
+    private var flareLineLayer: CALayer?
+    /// Rectangular alpha mask whose width = filled length (one piece, or two around a notch).
+    private var progressMask: CALayer?
+    /// Far-side mask piece for the notch `skip` case (nil otherwise).
+    private var progressMaskFar: CALayer?
+    /// Moves with the receding tip; carries the per-tick flare enlarge scale. Holds the tip
+    /// and flare sprites as siblings so they enlarge together while their transforms stay
+    /// independent of the tip's flicker keyframe.
+    private var tipHolder: CALayer?
+    /// `flareColor` flame sprite crossfaded over the tip near the end. Only built when flare
+    /// is enabled; nil otherwise.
+    private var flareLayer: CALayer?
+    /// GPU ember particles (spark effect only).
+    private var sparkEmitter: CAEmitterLayer?
+    /// Backing scale the current images were baked at, or nil before the first bake. Lets
+    /// `viewDidChangeBackingProperties` skip a redundant full re-bake when the scale is
+    /// unchanged (it fires alongside `viewDidMoveToWindow` on the initial attach).
+    private var bakedScale: CGFloat?
+
+    /// Edge length along the burn axis (the strip's long side).
+    private var edgeLength: CGFloat {
+        position.isHorizontal ? bounds.width : bounds.height
+    }
+
+    /// Usable burn length: the notch `skip` case removes the gap so the pace stays constant.
+    private var effectiveLength: CGFloat {
+        notchGap.map { edgeLength - $0.width } ?? edgeLength
+    }
 
     /// 0 outside the flare window, ramping 0→1 over the last `lead` seconds. The lead is
     /// clamped to `total/2` so a short timer doesn't sit flared from the start. Returns 0
-    /// when flare is off so the draw path stays on the existing fast path.
+    /// when flare is off.
     ///
     /// `total` is reconstructed from `remaining / progress` (since the engine's progress
     /// is `remaining / total`), which the view doesn't carry directly.
@@ -594,29 +624,59 @@ final class FuseView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        // The render timer is authoritative; suppress implicit animations.
-        layer?.actions = ["contents": NSNull(), "bounds": NSNull(), "position": NSNull()]
+        layer?.masksToBounds = false
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not supported") }
 
-    /// Sets the progress and forces a redraw (initial draw / settings change).
-    func setProgress(_ progress: Double) {
-        self.progress = min(1, max(0, progress))
-        needsDisplay = true
+    // MARK: - Backing / lifecycle
+
+    override var isFlipped: Bool { false }
+
+    /// Build once we know which window (and backing scale) we are attached to. This and
+    /// `viewDidChangeBackingProperties` both fire on the initial attach; the guard makes the
+    /// pair idempotent so the full-edge bitmaps bake only once (skip when the tree already
+    /// exists at the current scale).
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        rebuildLayersIfNeeded()
     }
 
-    /// Called by the render timer: stores progress/remaining, advances the flicker
-    /// phase, and redraws when the bar moved, the chosen tip effect animates, or the
-    /// flare ramp is active (so the amplification/color transition keeps advancing).
+    /// Re-bake the images when the backing scale changes (e.g. moved to a Retina display).
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        rebuildLayersIfNeeded()
+    }
+
+    /// Builds the layer tree on first attach and re-bakes only when the backing scale
+    /// actually changed, so the two lifecycle callbacks don't bake the bitmaps twice.
+    private func rebuildLayersIfNeeded() {
+        guard window != nil else { return }
+        if root != nil && bakedScale == backingScale { return }
+        rebuildLayers()
+    }
+
+    private var backingScale: CGFloat {
+        window?.backingScaleFactor ?? layer?.contentsScale ?? 2
+    }
+
+    // MARK: - Public API
+
+    /// Sets the progress immediately (no animation): initial draw / rebuild / preview.
+    func setProgress(_ progress: Double) {
+        self.progress = min(1, max(0, progress))
+        applyProgress(animated: false)
+    }
+
+    /// Called by the engine's 0.25s tick: store progress/remaining, glide the mask/tip to
+    /// the new values (0.25s linear), and refresh the flare crossfade. Flicker/spark are
+    /// already running as infinite GPU animations, so nothing per-frame happens here.
     func tick(progress: Double, remaining: TimeInterval) {
-        let clamped = min(1, max(0, progress))
-        let moved = clamped != self.progress
-        self.progress = clamped
+        self.progress = min(1, max(0, progress))
         self.remaining = remaining
-        phase &+= 1
-        if moved || tipEffect.isAnimated || flareFraction > 0 { needsDisplay = true }
+        applyProgress(animated: true)
+        applyFlare()
     }
 
     func containsVisibleFuse(at screenPoint: NSPoint, in window: NSWindow) -> Bool {
@@ -642,79 +702,6 @@ final class FuseView: NSView {
         return point.x <= min(edgeLength, filled + pad)
     }
 
-    override var isFlipped: Bool { false }
-
-    override func draw(_ dirtyRect: NSRect) {
-        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-        ctx.clear(bounds)
-
-        let horizontal = position.isHorizontal
-        // Length along the burning axis; the cross-axis is the strip (band + headroom).
-        // When skipping the notch, the gap's width is removed from the usable length so
-        // the line's pace stays constant — it just jumps the housing.
-        let edgeLength = horizontal ? bounds.width : bounds.height
-        let effectiveLength = notchGap.map { edgeLength - $0.width } ?? edgeLength
-        let filled = CGFloat(progress) * effectiveLength
-        guard filled > 0 else { return }
-
-        // Flare (F6): near the end, tint the fuse toward `flareColor` and amplify the tip.
-        // The color transition swaps `fuseColor` for the blended value for the duration of
-        // this draw (every helper reads `fuseColor`), then restores. `flareFraction` is
-        // already gated on `flareIntensifyEnabled`, so flare > 0 implies flare is on.
-        let flare = flareFraction
-        let baseColor = fuseColor
-        if flare > 0 {
-            fuseColor = blend(baseColor, flareColor, flare)
-        }
-        let intensify = flare * (flareEnlargeScale - 1)
-        defer { fuseColor = baseColor }
-
-        ctx.saveGState()
-        // Map the local frame (x = burn direction with tip at x = filled, y = 0 at the
-        // screen edge, +y toward the interior) onto the view. Each edge needs its own
-        // transform, but a single set of drawing code then serves all four positions.
-        switch position {
-        case .top:
-            // ty drops by topHeadroom so local y=0 (the line's edge) sits below the strip's
-            // top, leaving room above for the tip's upward spill (below-notch mode).
-            ctx.concatenate(CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: bounds.height - topHeadroom))
-        case .bottom:
-            break
-        case .left:
-            ctx.concatenate(CGAffineTransform(a: 0, b: 1, c: 1, d: 0, tx: 0, ty: 0))
-        case .right:
-            ctx.concatenate(CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: bounds.width, ty: 0))
-        }
-
-        if let gap = notchGap {
-            drawLineSkippingNotch(in: ctx, filled: filled, gap: gap, intensify: intensify)
-        } else {
-            drawTexture(in: ctx, length: filled, cross: thickness)
-            drawTip(in: ctx, at: CGPoint(x: filled, y: thickness / 2), cross: thickness, intensify: intensify)
-        }
-        ctx.restoreGState()
-    }
-
-    /// Draws the line in two pieces around the notch gap: everything up to the gap, then
-    /// (once past it) the remainder shifted across the gap's width, with the burning tip
-    /// on whichever piece is currently the leading end.
-    private func drawLineSkippingNotch(in ctx: CGContext, filled: CGFloat, gap: (start: CGFloat, width: CGFloat), intensify: CGFloat) {
-        if filled <= gap.start {
-            drawTexture(in: ctx, length: filled, cross: thickness)
-            drawTip(in: ctx, at: CGPoint(x: filled, y: thickness / 2), cross: thickness, intensify: intensify)
-            return
-        }
-        // Fill the segment left of the notch (no tip — it isn't the leading end), then
-        // continue on the far side of the gap.
-        drawTexture(in: ctx, length: gap.start, cross: thickness)
-        let secondLen = filled - gap.start
-        ctx.saveGState()
-        ctx.translateBy(x: gap.start + gap.width, y: 0)
-        drawTexture(in: ctx, length: secondLen, cross: thickness)
-        drawTip(in: ctx, at: CGPoint(x: secondLen, y: thickness / 2), cross: thickness, intensify: intensify)
-        ctx.restoreGState()
-    }
-
     private func drawingPoint(from viewPoint: NSPoint) -> NSPoint {
         switch position {
         case .top:
@@ -725,6 +712,366 @@ final class FuseView: NSView {
             return NSPoint(x: viewPoint.y, y: viewPoint.x)
         case .right:
             return NSPoint(x: viewPoint.y, y: bounds.width - viewPoint.x)
+        }
+    }
+
+    // MARK: - Layer tree assembly
+
+    /// (Re)builds the whole layer tree: bakes the texture/tip/flare sprites at the current
+    /// backing scale, wires up the mask, attaches the infinite flicker/spark animations, and
+    /// applies the current progress. Called on attach, backing-scale change, or settings
+    /// change (via `OverlayController.rebuildWindows`, which makes a fresh view).
+    private func rebuildLayers() {
+        guard let host = layer, edgeLength > 0, thickness > 0 else { return }
+        let scale = backingScale
+        bakedScale = scale
+
+        withoutAnimations {
+            // Tear down any previous tree (backing-scale change reuses the same view).
+            root?.removeFromSuperlayer()
+            let container = CALayer()
+            container.frame = bounds
+            container.anchorPoint = CGPoint(x: 0, y: 0)
+            container.position = CGPoint(x: 0, y: 0)
+            container.masksToBounds = false
+            // The root carries the 4-edge mapping; with anchor+position at the origin,
+            // `setAffineTransform(t)` reproduces the old `ctx.concatenate(t)` 1:1.
+            container.setAffineTransform(edgeTransform())
+            host.addSublayer(container)
+            root = container
+
+            buildLineLayer(scale: scale, into: container)
+            buildTipLayers(scale: scale, into: container)
+            if tipEffect == .spark { buildSparkEmitter(scale: scale, into: container) }
+
+            applyProgress(animated: false)
+            applyFlare()
+        }
+    }
+
+    /// The burn-axis-local → view transform for each edge (mirrors the old `draw` switch).
+    private func edgeTransform() -> CGAffineTransform {
+        switch position {
+        case .top:
+            return CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: bounds.height - topHeadroom)
+        case .bottom:
+            return .identity
+        case .left:
+            return CGAffineTransform(a: 0, b: 1, c: 1, d: 0, tx: 0, ty: 0)
+        case .right:
+            return CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: bounds.width, ty: 0)
+        }
+    }
+
+    /// Bakes the base + flare texture bars once and wraps them in a container that carries
+    /// the shared width-driven progress mask. The flare layer crossfades over the base near
+    /// the end (F6) so the whole filled line tints toward `flareColor`, not just the tip.
+    private func buildLineLayer(scale: CGFloat, into container: CALayer) {
+        // A container so both texture layers share ONE progress mask (revealing the same
+        // filled length) and crossfade independently via opacity.
+        let lineBox = CALayer()
+        lineBox.anchorPoint = CGPoint(x: 0, y: 0)
+        lineBox.position = CGPoint(x: 0, y: 0)
+        lineBox.bounds = CGRect(x: 0, y: 0, width: edgeLength, height: thickness)
+        container.addSublayer(lineBox)
+
+        // The base bar is baked across the FULL edge length (not effectiveLength) so the
+        // far-of-notch stretch still has texture content out to the screen edge.
+        let line = CALayer()
+        line.anchorPoint = CGPoint(x: 0, y: 0)
+        line.position = CGPoint(x: 0, y: 0)
+        line.bounds = lineBox.bounds
+        line.contentsScale = scale
+        line.contents = bakeTexture(length: edgeLength, cross: thickness, color: fuseColor, scale: scale)
+        lineBox.addSublayer(line)
+
+        // The `flareColor` bar crossfades over the base near the end. Only bake/add it when
+        // flare is enabled — otherwise this full-edge bitmap would be wasted every rebuild.
+        if flareIntensifyEnabled {
+            let flareLine = CALayer()
+            flareLine.anchorPoint = CGPoint(x: 0, y: 0)
+            flareLine.position = CGPoint(x: 0, y: 0)
+            flareLine.bounds = lineBox.bounds
+            flareLine.contentsScale = scale
+            flareLine.contents = bakeTexture(length: edgeLength, cross: thickness, color: flareColor, scale: scale)
+            flareLine.opacity = 0
+            lineBox.addSublayer(flareLine)
+            flareLineLayer = flareLine
+        } else {
+            flareLineLayer = nil
+        }
+
+        // The mask reveals 0…filled of the container (both bars) by alpha. An opaque black
+        // rectangle of the right width is enough — only its alpha coverage matters.
+        let mask = CALayer()
+        mask.anchorPoint = CGPoint(x: 0, y: 0)
+        mask.position = CGPoint(x: 0, y: 0)
+        mask.backgroundColor = NSColor.black.cgColor
+        lineBox.mask = mask
+        progressMask = mask
+
+        // Notch `skip`: a second mask piece on the far side of the gap exposes the texture
+        // stretch past the housing; the main mask covers only up to the gap.
+        if notchGap != nil {
+            let far = CALayer()
+            far.anchorPoint = CGPoint(x: 0, y: 0)
+            far.position = CGPoint(x: 0, y: 0)
+            far.backgroundColor = NSColor.black.cgColor
+            mask.addSublayer(far)
+            progressMaskFar = far
+        } else {
+            progressMaskFar = nil
+        }
+    }
+
+    /// Bakes the static tip sprite (glow/flame) and the flare sprite once, then nests both
+    /// inside a holder centered on the burn point. The holder moves with progress and
+    /// carries the flare enlarge scale; the tip sprite separately carries the infinite
+    /// flicker keyframe, so the two transforms compose without fighting over `transform`.
+    private func buildTipLayers(scale: CGFloat, into container: CALayer) {
+        // The sprite square must hold the baseline flame/glow extent plus its blur. The
+        // flicker/flare runtime scale-ups (≤ ~1.15× and the enlarge multiplier) grow the
+        // already-baked sprite — acceptable softening, no extra bitmap room needed.
+        let pad = FuseMetrics.tipPadding(thickness: thickness, scale: tipScale)
+        let glowReach = max(thickness * 0.9, 3) * tipScale * 2.6   // glow blur ≈ radius·1.6
+        let flameReach = (thickness / 2 + pad * 0.85) * 1.45        // flame body·core scaleX
+        // Sprite half-extent: square of side 2·extent, its center mapping to the burn point.
+        let tipExtent = ceil(max(glowReach, flameReach, thickness)) + 2
+        let side = tipExtent * 2
+
+        // A zero-size holder pinned to the burn point; sprites center on it via their own
+        // anchorPoint (0.5, 0.5) at the holder's local origin.
+        let holder = CALayer()
+        holder.bounds = .zero
+        container.addSublayer(holder)
+        tipHolder = holder
+
+        let tip = CALayer()
+        tip.bounds = CGRect(x: 0, y: 0, width: side, height: side)
+        tip.position = .zero
+        tip.contentsScale = scale
+        tip.contents = bakeTip(extent: tipExtent, scale: scale)
+        holder.addSublayer(tip)
+
+        // The `flareColor` flame crossfades over the tip near the end. Only bake/add it when
+        // flare is enabled — otherwise this tip sprite would be wasted every rebuild.
+        if flareIntensifyEnabled {
+            let flare = CALayer()
+            flare.bounds = CGRect(x: 0, y: 0, width: side, height: side)
+            flare.position = .zero
+            flare.contentsScale = scale
+            flare.contents = bakeFlareTip(extent: tipExtent, scale: scale)
+            flare.opacity = 0
+            holder.addSublayer(flare)
+            flareLayer = flare
+        } else {
+            flareLayer = nil
+        }
+
+        if tipEffect.isAnimated {
+            attachFlicker(to: tip)
+        }
+    }
+
+    /// An infinite, GPU-driven flicker on the tip's scale, sampled from the same multi-sine
+    /// curve the old per-frame `flicker()` used (baseline `intensify = 0`). The window is
+    /// closed back to its first value so the looping keyframe has no positional jump at the
+    /// seam (the two sines don't share an integer period, so an exact loop isn't possible —
+    /// only the tiny slope change at the seam remains, imperceptible at this amplitude).
+    private func attachFlicker(to layer: CALayer) {
+        let steps = 120
+        var values: [CGFloat] = (0..<steps).map { flicker(phase: $0) }
+        values.append(values[0])
+        let anim = CAKeyframeAnimation(keyPath: "transform.scale")
+        anim.values = values
+        anim.duration = Double(steps) / 30.0   // matches the old 30fps phase advance
+        anim.repeatCount = .infinity
+        anim.calculationMode = .linear
+        anim.isRemovedOnCompletion = false
+        layer.add(anim, forKey: "flicker")
+    }
+
+    /// GPU ember particles approximating `drawSparks`: warm embers rising into the interior
+    /// off the burn point and fading out. Replaces the 7 per-frame ember dots.
+    private func buildSparkEmitter(scale: CGFloat, into container: CALayer) {
+        let pad = FuseMetrics.tipPadding(thickness: thickness, scale: tipScale)
+        let reach = thickness / 2 + pad * 0.85
+        let r = max(thickness * 0.22, 1) * tipScale
+
+        let lifetime = max(0.6, reach / 18)             // seconds to cross the reach
+        let cell = CAEmitterCell()
+        cell.contents = bakeEmber(radius: r, scale: scale)
+        cell.birthRate = 12
+        cell.lifetime = Float(lifetime)
+        cell.lifetimeRange = 0.25
+        cell.velocity = reach / lifetime                // ~reach over a lifetime
+        cell.velocityRange = reach * 0.3
+        cell.emissionLongitude = .pi / 2               // +y, into the interior
+        cell.emissionRange = .pi / 6
+        cell.scale = 1
+        cell.scaleRange = 0.4
+        cell.scaleSpeed = -0.7                          // shrink as they spend (1 - life·0.7)
+        cell.alphaSpeed = Float(-1.0 / lifetime)        // fade out over the lifetime
+        cell.color = NSColor(srgbRed: 1, green: 0.9, blue: 0.55, alpha: 0.9).cgColor
+
+        let emitter = CAEmitterLayer()
+        emitter.emitterShape = .point
+        emitter.emitterPosition = CGPoint(x: 0, y: thickness / 2)
+        emitter.emitterCells = [cell]
+        emitter.renderMode = .additive
+        container.addSublayer(emitter)
+        sparkEmitter = emitter
+    }
+
+    // MARK: - Per-tick updates
+
+    /// Positions the progress mask (width = filled length) and the tip holder/emitter at the
+    /// receding end, optionally gliding both over `tickDuration` so the 0.25s tick reads
+    /// smoothly. The notch `skip` case fills two mask pieces around the gap.
+    private func applyProgress(animated: Bool) {
+        guard let mask = progressMask, let holder = tipHolder else { return }
+        let filled = CGFloat(progress) * effectiveLength
+        let cy = thickness / 2
+
+        let run = { (body: () -> Void) in
+            if animated { self.animatingTick(body) } else { self.withoutAnimations(body) }
+        }
+
+        let tipX: CGFloat
+        if let gap = notchGap, let far = progressMaskFar {
+            // Near piece: up to min(filled, gap.start). Far piece: the remainder, shifted
+            // across the gap so it sits on the texture stretch past the housing.
+            let nearW = max(0, min(filled, gap.start))
+            let farLen = max(0, filled - gap.start)
+            // Tip rides whichever piece is the leading end.
+            tipX = filled <= gap.start ? filled : (gap.start + gap.width) + farLen
+            run {
+                mask.bounds = CGRect(x: 0, y: 0, width: nearW, height: self.thickness)
+                far.frame = CGRect(x: gap.start + gap.width, y: 0, width: farLen, height: self.thickness)
+                holder.position = CGPoint(x: tipX, y: cy)
+                self.sparkEmitter?.emitterPosition = CGPoint(x: tipX, y: cy)
+            }
+        } else {
+            tipX = filled
+            run {
+                mask.bounds = CGRect(x: 0, y: 0, width: filled, height: self.thickness)
+                holder.position = CGPoint(x: tipX, y: cy)
+                self.sparkEmitter?.emitterPosition = CGPoint(x: tipX, y: cy)
+            }
+        }
+
+        // Hide the tip/sparks before ignition (a zero-coverage mask hides the line, but the
+        // tip sprite would still show floating at x=0). The emitter's birthRate is a
+        // multiplier on the cell rate — gate it 0/1 so the effective rate stays at the cell's
+        // configured value.
+        withoutAnimations {
+            holder.isHidden = filled <= 0
+            sparkEmitter?.birthRate = filled <= 0 ? 0 : 1
+        }
+    }
+
+    /// Drives the flare (F6) crossfade across the whole fuse: the `flareColor` texture bar
+    /// fades over the base line AND the flare flame sprite fades over the tip (both at
+    /// `flareFraction`), while the tip+flare grow via the holder scale. Mirrors the old
+    /// per-draw `fuseColor → flareColor` blend, which tinted the line and the tip together.
+    private func applyFlare() {
+        guard let holder = tipHolder, let flare = flareLayer else { return }
+        let frac = flareFraction
+        let enlarge = 1 + frac * (flareEnlargeScale - 1)
+        withoutAnimations {
+            flareLineLayer?.opacity = Float(frac)
+            flare.opacity = Float(frac)
+            holder.transform = CATransform3DMakeScale(enlarge, enlarge, 1)
+        }
+    }
+
+    // MARK: - Animation helpers
+
+    /// Runs `body` with implicit layer actions disabled (immediate, no animation).
+    private func withoutAnimations(_ body: () -> Void) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        body()
+        CATransaction.commit()
+    }
+
+    /// Runs `body` inside a `tickDuration` linear transaction so geometry changes glide.
+    private func animatingTick(_ body: () -> Void) {
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(tickDuration)
+        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .linear))
+        body()
+        CATransaction.commit()
+    }
+
+    // MARK: - Offscreen baking
+
+    /// Creates an offscreen bitmap context at `scale` whose user space matches the existing
+    /// bottom-left, y-up draw space, runs `body`, and returns the rendered image.
+    private func bakedImage(width: CGFloat, height: CGFloat, scale: CGFloat, _ body: (CGContext) -> Void) -> CGImage? {
+        let pxW = max(1, Int((width * scale).rounded()))
+        let pxH = max(1, Int((height * scale).rounded()))
+        guard let ctx = CGContext(data: nil, width: pxW, height: pxH, bitsPerComponent: 8,
+                                  bytesPerRow: 0, space: deviceRGB,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.scaleBy(x: scale, y: scale)
+        body(ctx)
+        return ctx.makeImage()
+    }
+
+    /// Bakes the full-length texture bar (`drawTexture` verbatim) into a `CGImage`.
+    private func bakeTexture(length: CGFloat, cross: CGFloat, color: NSColor, scale: CGFloat) -> CGImage? {
+        // `drawTexture` and its sub-helpers read `fuseColor`; swap it for the bake so the
+        // same code path serves both the base bar and the `flareColor` bar.
+        let saved = fuseColor
+        fuseColor = color
+        defer { fuseColor = saved }
+        return bakedImage(width: max(1, length), height: cross, scale: scale) { ctx in
+            drawTexture(in: ctx, length: length, cross: cross)
+        }
+    }
+
+    /// Bakes the static tip sprite (`drawGlow` or `drawFlame`, including its `setShadow`
+    /// blur) centered in a `2·extent` square so the burn point sits at the sprite center.
+    private func bakeTip(extent: CGFloat, scale: CGFloat) -> CGImage? {
+        let side = extent * 2
+        return bakedImage(width: side, height: side, scale: scale) { ctx in
+            // Draw with the burn point at the sprite center, in the same y-up flame space:
+            // the flame's interior reach (+y) goes up, matching the line's local +y.
+            let center = CGPoint(x: extent, y: extent)
+            ctx.translateBy(x: center.x, y: center.y - thickness / 2)
+            switch tipEffect {
+            case .glow:
+                drawGlow(in: ctx, at: CGPoint(x: 0, y: thickness / 2), cross: thickness)
+            case .flame, .spark:
+                // Neutral-size flame; flicker/flare scale it at composite time.
+                drawFlame(in: ctx, at: CGPoint(x: 0, y: thickness / 2), cross: thickness)
+            }
+        }
+    }
+
+    /// Bakes a flame sprite tinted by `flareColor` (the crossfade target near the end).
+    private func bakeFlareTip(extent: CGFloat, scale: CGFloat) -> CGImage? {
+        let side = extent * 2
+        let saved = fuseColor
+        fuseColor = flareColor
+        defer { fuseColor = saved }
+        return bakedImage(width: side, height: side, scale: scale) { ctx in
+            ctx.translateBy(x: extent, y: extent - thickness / 2)
+            drawFlame(in: ctx, at: CGPoint(x: 0, y: thickness / 2), cross: thickness)
+        }
+    }
+
+    /// Bakes a single soft ember dot (matching `drawSparks`' blurred ember) for the emitter.
+    private func bakeEmber(radius r: CGFloat, scale: CGFloat) -> CGImage? {
+        let blur = r * 1.6
+        let side = (r + blur) * 2
+        let c = side / 2
+        return bakedImage(width: side, height: side, scale: scale) { ctx in
+            ctx.setShadow(offset: .zero, blur: blur,
+                          color: NSColor(srgbRed: 1, green: 0.55, blue: 0.1, alpha: 0.9).cgColor)
+            ctx.setFillColor(NSColor(srgbRed: 1, green: 0.9, blue: 0.55, alpha: 1).cgColor)
+            ctx.fillEllipse(in: CGRect(x: c - r, y: c - r, width: r * 2, height: r * 2))
         }
     }
 
@@ -754,7 +1101,7 @@ final class FuseView: NSView {
     /// A cylindrical sheen across the band: shaded edges, a soft highlight down the
     /// middle. Makes the cord read as round rather than a flat ribbon.
     private func drawRoundShading(in ctx: CGContext, band: CGRect) {
-        let space = CGColorSpaceCreateDeviceRGB()
+        let space = deviceRGB
         let clear = fuseColor.withAlphaComponent(0).cgColor
         let edge = darken(fuseColor, 0.4).withAlphaComponent(0.55).cgColor
         let sheen = lighten(fuseColor, 0.55).withAlphaComponent(0.5).cgColor
@@ -812,18 +1159,6 @@ final class FuseView: NSView {
 
     // MARK: - Burning tip
 
-    private func drawTip(in ctx: CGContext, at tip: CGPoint, cross c: CGFloat, intensify: CGFloat) {
-        switch tipEffect {
-        case .glow:
-            drawGlow(in: ctx, at: tip, cross: c)
-        case .flame:
-            drawFlame(in: ctx, at: tip, cross: c, intensify: intensify)
-        case .spark:
-            drawFlame(in: ctx, at: tip, cross: c, intensify: intensify)
-            drawSparks(in: ctx, at: tip, cross: c)
-        }
-    }
-
     /// A brighter/whiter dot with a soft glow (classic).
     private func drawGlow(in ctx: CGContext, at center: CGPoint, cross c: CGFloat) {
         let radius = max(c * 0.9, 3) * tipScale
@@ -844,20 +1179,15 @@ final class FuseView: NSView {
     /// A layered flame at the burn point: a fuse-tinted halo, an amber body, and a
     /// white-hot core. The hot core sits on the line and the flame bulges into the
     /// interior `tipPadding` headroom (slightly past the configured width) and licks a
-    /// little along the burn axis. A gentle flicker scales it each frame.
-    private func drawFlame(in ctx: CGContext, at tip: CGPoint, cross c: CGFloat, intensify: CGFloat) {
-        let space = CGColorSpaceCreateDeviceRGB()
-        let f = flicker(intensify: intensify)
+    /// little along the burn axis. Baked once at the neutral size; the tip layer's
+    /// flicker keyframe and flare scale animate it at composite time.
+    private func drawFlame(in ctx: CGContext, at tip: CGPoint, cross c: CGFloat) {
+        let space = deviceRGB
         let clear = fuseColor.withAlphaComponent(0).cgColor
-
-        // Flare (F6): grow the flame body and white-hot core toward the end. 0 leaves the
-        // baseline; 1 reaches ~1.6× body / ~1.5× core.
-        let bodyBoost = 1 + intensify * 0.6
-        let coreBoost = 1 + intensify * 0.5
 
         // Reach from the line center toward the interior; kept just inside the headroom
         // so the gradient's alpha has faded out before the strip edge clips it.
-        let reach = (c / 2 + FuseMetrics.tipPadding(thickness: c, scale: tipScale) * 0.85) * f * bodyBoost
+        let reach = c / 2 + FuseMetrics.tipPadding(thickness: c, scale: tipScale) * 0.85
         let center = CGPoint(x: tip.x, y: c / 2)
 
         // Outer halo, tinted by the fuse color so the line's hue carries into the flame.
@@ -875,30 +1205,7 @@ final class FuseView: NSView {
         // Tight white-hot center right at the burn point on the line.
         let white = NSColor(srgbRed: 1, green: 1, blue: 0.95, alpha: 1).cgColor
         drawRadial(ctx, space, [white, clear], [0, 1],
-                   center: tip, radius: max(c * 0.7, 3.5) * tipScale * coreBoost, scaleX: 1.4, scaleY: 1.2)
-    }
-
-    /// A few flickering embers rising off the burn point into the interior, fading with
-    /// their deterministic per-frame "life" so they twinkle without random state.
-    private func drawSparks(in ctx: CGContext, at tip: CGPoint, cross c: CGFloat) {
-        let pad = FuseMetrics.tipPadding(thickness: c, scale: tipScale)
-        let reach = c / 2 + pad * 0.85
-        let ember = NSColor(srgbRed: 1, green: 0.9, blue: 0.55, alpha: 1)
-        for i in 0..<7 {
-            let seed = phase / 2 + i * 37
-            let life = hash01(seed)                              // 0 = fresh, 1 = spent
-            let sx = tip.x + (hash01(seed &* 7) - 0.5) * pad * 0.7  // sway along the fuse
-            let sy = c / 2 + life * reach                          // rises into the interior
-            let alpha = (1 - life) * 0.9
-            let r = max(c * 0.22, 1) * tipScale * (1 - life * 0.7)
-            guard alpha > 0.05, r > 0.4 else { continue }
-            ctx.saveGState()
-            ctx.setShadow(offset: .zero, blur: r * 1.6,
-                          color: NSColor(srgbRed: 1, green: 0.55, blue: 0.1, alpha: alpha).cgColor)
-            ctx.setFillColor(ember.withAlphaComponent(alpha).cgColor)
-            ctx.fillEllipse(in: CGRect(x: sx - r, y: sy - r, width: r * 2, height: r * 2))
-            ctx.restoreGState()
-        }
+                   center: tip, radius: max(c * 0.7, 3.5) * tipScale, scaleX: 1.4, scaleY: 1.2)
     }
 
     // MARK: - Drawing helpers
@@ -920,20 +1227,14 @@ final class FuseView: NSView {
         ctx.restoreGState()
     }
 
-    /// A gentle multi-sine flicker in roughly 0.7...1.15, deterministic in `phase`.
-    /// `intensify` (0...1, flare) widens the wobble and lifts the clamp so the flame
-    /// agitates harder toward the end.
-    private func flicker(intensify: CGFloat = 0) -> CGFloat {
+    /// A gentle multi-sine flicker in roughly 0.7...1.15, sampled at integer `phase`. The
+    /// old per-frame redraw advanced `phase` by 1 each 1/30s frame; the GPU keyframe
+    /// animation now samples this same curve at those frame indices. Baseline only
+    /// (no `intensify`) — flare's amplification is folded into the flare layer's scale.
+    private func flicker(phase: Int) -> CGFloat {
         let t = CGFloat(phase)
-        let gain = 1 + intensify * 1.5
-        let v = 0.9 + 0.1 * gain * sin(t * 0.45) + 0.05 * gain * sin(t * 1.3 + 1.7)
-        return max(0.7, min(1.15 + intensify * 0.35, v))
-    }
-
-    /// A reproducible pseudo-random value in 0...1 from an integer seed (no RNG state).
-    private func hash01(_ n: Int) -> CGFloat {
-        let s = sin(CGFloat(n) * 12.9898) * 43758.5453
-        return s - floor(s)
+        let v = 0.9 + 0.1 * sin(t * 0.45) + 0.05 * sin(t * 1.3 + 1.7)
+        return max(0.7, min(1.15, v))
     }
 
     private func lighten(_ color: NSColor, _ amount: CGFloat) -> NSColor {
