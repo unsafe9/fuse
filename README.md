@@ -15,6 +15,11 @@ When a timer runs, Fuse draws a line across a full screen edge — over fullscre
 - **Presets** — one ordered, reorderable list of time expressions you mix freely: fixed durations (`5m`, `1h30m`, `90`, `45s`) and minute-of-hour marks (`:15`, `:30`, `:45`, `:00`). The list order sets the menu order.
 - **Custom timer panel** — type a time expression (and an optional name) for anything the presets don't cover.
 - **Single timer** — exactly one timer runs at a time; starting a new one silently replaces the running one.
+- **Auto-repeat** — a duration timer can re-ignite for the same length when it expires, for a fixed number of rounds (`25m ×4`). Each round still fires its own completion notification. Set it with an `xN` suffix on a preset expression (`25m x4`), the **Repeat** row in the custom panel, or AppleScript's `repeating` argument. Deadline (`:MM` / `HH:MM`) timers don't repeat.
+- **Round counter** — while a repeat is running, the menu and the hover tooltip show the current round (`#2/4`).
+- **End time (ETA)** — the hover tooltip can show when the timer ends as a wall-clock time (`ends 14:35`), plus the projected finish of the whole repeat relay (`all done ~16:10`). Toggle in General › Behavior. (on by default)
+- **Repeat last / last finished** — when no timer is running, the menu offers a one-click `↻ Again` to restart the last timer, and can optionally show a recap of the last finished timer (`Last: tea · ended 14:32`). The recap is toggled in General › Behavior (off by default).
+- **Final-stretch flare** — near the end, the fuse shifts toward a warning color and grows its flame. Toggle in the Fuse › Appearance tab (on by default), with a color well to pick the warning color and a "Flare size" slider for how much the flame grows. Visual only — the end time never changes.
 - **Completion notification** — delivered via the system notification center, with a configurable body and an optional sound.
 - **Remaining time in the menu bar** — optionally show the live countdown next to the icon.
 - **Caffeinate-style power options** — prevent system idle sleep while a timer runs, and optionally keep the Mac awake even with the lid closed.
@@ -53,7 +58,7 @@ Click the menubar icon to open the menu. It lists your presets in order. Each pr
 - A **duration** expression starts a timer for a fixed length and shows as *25 min*, *1 h 30 min*, *45 sec*, etc.
 - A **minute-of-hour mark** (`:MM`) targets the next time the clock reaches that minute, and shows the computed target time — e.g. at 14:50, *:15* ends at 15:15, *:30* at 15:30, *:45* at 15:45, and *:00* (top of the hour) at 15:00. Exactly on a mark, the next occurrence is used (at 15:15 sharp, *:15* ends at 16:15).
 
-Use **Custom Timer…** for anything not in your preset list. The panel accepts the same time expressions plus an optional name:
+Use **Custom Timer…** for anything not in your preset list. The panel accepts the same time expressions plus an optional name, and a **Repeat** row that auto-repeats a duration for a chosen number of rounds:
 
 | Expression        | Meaning                                                            |
 | ----------------- | ----------------------------------------------------------------- |
@@ -64,6 +69,7 @@ Use **Custom Timer…** for anything not in your preset list. The panel accepts 
 | `:15`             | minute-of-hour mark → the next time the clock minute hits 15 (`:00` = top of the hour) |
 | `10:00`           | the next occurrence of that 24-hour wall-clock time (today if still in the future, else tomorrow) |
 | `23:30`           | next occurrence of 23:30                                          |
+| `25m x4`          | a trailing `xN` (≥ 2) auto-repeats a **duration** for N rounds (here, four 25-minute rounds); not valid on a `:MM`/`HH:MM` deadline |
 
 A leading-colon `:MM` (no hour digits, `MM` 00–59) is a minute-of-hour mark; with hour digits before the colon it's an absolute `HH:MM` clock time. Invalid input (empty, garbage, a zero or negative total, a mark with `MM` > 59, or a clock time with minutes > 59 / hours > 23) is rejected with an inline message.
 
@@ -71,13 +77,14 @@ A leading-colon `:MM` (no hour digits, `MM` 00–59) is a minute-of-hour mark; w
 
 ## AppleScript
 
-Fuse exposes two commands.
+Fuse exposes three commands.
 
-Start a timer (the optional `named` argument sets the timer name):
+Start a timer (the optional `named` argument sets the timer name; the optional `repeating` argument auto-repeats a duration for that many rounds — `2` or more, ignored on a clock-time expression):
 
 ```sh
 osascript -e 'tell application "Fuse" to start timer "5m" named "tea"'
 osascript -e 'tell application "Fuse" to start timer "10:00"'
+osascript -e 'tell application "Fuse" to start timer "25m" named "focus" repeating 4'
 ```
 
 Stop the running timer:
@@ -86,16 +93,27 @@ Stop the running timer:
 osascript -e 'tell application "Fuse" to stop timer'
 ```
 
+Restart the most recently started timer (as a single shot, re-resolving a deadline to its next occurrence):
+
+```sh
+osascript -e 'tell application "Fuse" to repeat last timer'
+```
+
 The expression grammar is identical to the custom panel. On bad input the command sets an AppleScript error with the same human-readable reason shown in the panel.
 
 Fuse also exposes read-only properties on the application for querying presets and the current timer state:
 
-| Property     | Type         | Meaning                                            |
-| ------------ | ------------ | -------------------------------------------------- |
-| `presets`    | list of text | The stored preset expressions, in order.           |
-| `running`    | boolean      | `true` while a timer is active.                    |
-| `remaining`  | integer      | Whole seconds left on the running timer (`0` if none). |
-| `timer name` | text         | The running timer's name (`""` if none or unnamed). |
+| Property        | Type         | Meaning                                            |
+| --------------- | ------------ | -------------------------------------------------- |
+| `presets`       | list of text | The stored preset expressions, in order.           |
+| `running`       | boolean      | `true` while a timer is active.                    |
+| `remaining`     | integer      | Whole seconds left on the running timer (`0` if none). |
+| `timer name`    | text         | The running timer's name (`""` if none or unnamed). |
+| `ends`          | text         | The running timer's end time as `HH:mm` (`""` if none). |
+| `round`         | integer      | The running timer's current round, 1-based (`0` if none). |
+| `last ended at` | text         | The last finished timer's end time as `HH:mm` (`""` if nothing has finished). |
+| `last started`  | text         | The most recently started timer's time expression, e.g. `5m` or `25m x4` (`""` if none). |
+| `last started name` | text     | The most recently started timer's name (`""` if none or unnamed). |
 
 ```sh
 osascript -e 'tell application "Fuse" to get presets'
@@ -125,8 +143,9 @@ An empty query lists your configured presets in order (read from the running app
 Settings open from the menu and are grouped into four tabs. Everything persists in `UserDefaults`.
 
 **General**
-- Presets — one editable, reorderable list of time expressions (default `1m/3m/5m/10m/15m/20m/30m/45m/60m/90m/120m/:15/:30/:45/:00`). Durations and minute-of-hour marks live in the same list; add with a text field that validates the expression (appended to the end, invalid input is rejected inline), remove per row, and reorder by dragging a row or using its up/down buttons. The list is deduplicated but not sorted — its order sets the menu order. There is no duration/deadline mode switch.
+- Presets — one editable, reorderable list of time expressions (default `1m/3m/5m/10m/15m/20m/30m/45m/60m/90m/120m/25m x4/:15/:30/:45/:00`). Durations and minute-of-hour marks live in the same list; add with a text field that validates the expression (appended to the end, invalid input is rejected inline), remove per row, and reorder by dragging a row or using its up/down buttons. The list is deduplicated but not sorted — its order sets the menu order. There is no duration/deadline mode switch.
 - Show remaining time in the menu bar (default on).
+- *Behavior:* show the end time (ETA) in the fuse hover tooltip (default on), and show the last finished timer at the top of the idle menu (default off).
 
 **Fuse**
 - Enable overlay (master toggle, default on).
@@ -136,6 +155,7 @@ Settings open from the menu and are grouped into four tabs. Everything persists 
 - Burning tip: Glow (the classic dot), Flame (a licking flame, default), or Sparks (a flame with trailing embers). Flame and Sparks flicker and bulge a little past the line into the screen so the fire is visible without widening the line itself.
 - Tip size: a 0.5×–3× slider (default 1×) that scales the burning tip (and the room it has to bulge into the screen).
 - Position: top, bottom, left, or right edge (default top).
+- Flare near the end (default on): the fuse shifts toward a warning color in the final seconds, without changing the end time. Pick the warning color with the adjacent color well (orange by default), and set the "Flare size" slider (1×–3×, default 2×) for how much the flame grows toward the end.
 - Display: main display, all displays, or a specific screen (default main display).
 - Reset to Defaults restores color, thickness, texture, burning tip, and position to their defaults (presets, display, notifications, and power options are left alone).
 

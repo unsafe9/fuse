@@ -34,13 +34,22 @@ final class SettingsStore: ObservableObject {
         static let preventSleep = "preventSleep"
         static let preventDisplaySleep = "preventDisplaySleep"
         static let keepAwakeLidClosed = "keepAwakeLidClosed"
+        static let showEndTimeInTooltip = "showEndTimeInTooltip"
+        static let showLastFinishedInMenu = "showLastFinishedInMenu"
+        static let flareIntensifyEnabled = "flareIntensifyEnabled"
+        static let flareEnlargeScale = "flareEnlargeScale"
+        static let flareColorHex = "flareColorHex"
+        static let lastStartedExpression = "lastStartedExpression"
+        static let lastStartedName = "lastStartedName"
+        static let lastEndedName = "lastEndedName"
+        static let lastEndedAt = "lastEndedAt"
     }
 
     // MARK: Default values
 
     /// Fresh-install presets: durations first, then minute-of-hour marks. Each is a
     /// time expression (the same grammar as the custom panel and AppleScript).
-    static let defaultPresets = ["1m", "3m", "5m", "10m", "15m", "20m", "30m", "45m", "60m", "90m", "120m", ":15", ":30", ":45", ":00"]
+    static let defaultPresets = ["1m", "3m", "5m", "10m", "15m", "20m", "30m", "45m", "60m", "90m", "120m", "25m x4", ":15", ":30", ":45", ":00"]
     /// Pure red, fully opaque.
     static let defaultColorHex = "FF1F1FFF"
     static let defaultThickness: Double = 4
@@ -54,6 +63,16 @@ final class SettingsStore: ObservableObject {
     static let defaultTipScale: Double = 1.0
     static let minTipScale: Double = 0.5
     static let maxTipScale: Double = 3.0
+    /// Warning color the fuse transitions toward near the end (orange, opaque).
+    static let defaultFlareColorHex = "FF6A00FF"
+    /// Flare enlargement: how much the flame/tip grows near the end, as a multiplier
+    /// (1× = no growth). Clamped to `minFlareScale...maxFlareScale`.
+    static let defaultFlareEnlargeScale: Double = 2.0
+    static let minFlareScale: Double = 1.0
+    static let maxFlareScale: Double = 3.0
+    /// Seconds before the end at which flare (intensify/warning color) ramps in.
+    /// A code constant (not exposed in UI); see the flare design notes.
+    static let flareLeadSeconds: TimeInterval = 30
 
     // MARK: Published settings (feature 5)
 
@@ -155,6 +174,60 @@ final class SettingsStore: ObservableObject {
         didSet { defaults.set(keepAwakeLidClosed, forKey: Key.keepAwakeLidClosed) }
     }
 
+    /// Show the end-of-timer wall-clock time (ETA) in the fuse hover tooltip.
+    @Published var showEndTimeInTooltip: Bool {
+        didSet { defaults.set(showEndTimeInTooltip, forKey: Key.showEndTimeInTooltip) }
+    }
+
+    /// Show a recap of the last finished timer at the top of the idle menu.
+    @Published var showLastFinishedInMenu: Bool {
+        didSet { defaults.set(showLastFinishedInMenu, forKey: Key.showLastFinishedInMenu) }
+    }
+
+    /// Master flare toggle: near the end, shift the fuse toward `flareColorHex`.
+    @Published var flareIntensifyEnabled: Bool {
+        didSet { defaults.set(flareIntensifyEnabled, forKey: Key.flareIntensifyEnabled) }
+    }
+
+    /// How much the flame/tip grows near the end (1× = no growth). Sub-option of
+    /// `flareIntensifyEnabled`; clamped to `minFlareScale...maxFlareScale`.
+    @Published var flareEnlargeScale: Double {
+        didSet {
+            let clamped = min(Self.maxFlareScale, max(Self.minFlareScale, flareEnlargeScale))
+            if clamped != flareEnlargeScale {
+                flareEnlargeScale = clamped
+                return
+            }
+            defaults.set(flareEnlargeScale, forKey: Key.flareEnlargeScale)
+        }
+    }
+
+    /// Warning color the fuse transitions toward, stored as an "RRGGBBAA" hex string.
+    @Published var flareColorHex: String {
+        didSet { defaults.set(flareColorHex, forKey: Key.flareColorHex) }
+    }
+
+    /// The original time expression of the last started timer (F4 repeat last), e.g.
+    /// "5m" or ":30". Preserved as the *expression* so a deadline re-resolves correctly.
+    @Published var lastStartedExpression: String? {
+        didSet { defaults.set(lastStartedExpression, forKey: Key.lastStartedExpression) }
+    }
+
+    /// The name of the last started timer (F4), if any.
+    @Published var lastStartedName: String? {
+        didSet { defaults.set(lastStartedName, forKey: Key.lastStartedName) }
+    }
+
+    /// The name of the last finished timer (F5 idle recap), if any.
+    @Published var lastEndedName: String? {
+        didSet { defaults.set(lastEndedName, forKey: Key.lastEndedName) }
+    }
+
+    /// When the last timer finished (F5) — its original expiry instant.
+    @Published var lastEndedAt: Date? {
+        didSet { defaults.set(lastEndedAt, forKey: Key.lastEndedAt) }
+    }
+
     // MARK: Init
 
     init(defaults: UserDefaults = .standard) {
@@ -176,6 +249,15 @@ final class SettingsStore: ObservableObject {
         preventSleep = defaults.object(forKey: Key.preventSleep) as? Bool ?? true
         preventDisplaySleep = defaults.object(forKey: Key.preventDisplaySleep) as? Bool ?? true
         keepAwakeLidClosed = defaults.object(forKey: Key.keepAwakeLidClosed) as? Bool ?? false
+        showEndTimeInTooltip = defaults.object(forKey: Key.showEndTimeInTooltip) as? Bool ?? true
+        showLastFinishedInMenu = defaults.object(forKey: Key.showLastFinishedInMenu) as? Bool ?? false
+        flareIntensifyEnabled = defaults.object(forKey: Key.flareIntensifyEnabled) as? Bool ?? true
+        flareEnlargeScale = defaults.object(forKey: Key.flareEnlargeScale) as? Double ?? Self.defaultFlareEnlargeScale
+        flareColorHex = defaults.string(forKey: Key.flareColorHex) ?? Self.defaultFlareColorHex
+        lastStartedExpression = defaults.string(forKey: Key.lastStartedExpression)
+        lastStartedName = defaults.string(forKey: Key.lastStartedName)
+        lastEndedName = defaults.string(forKey: Key.lastEndedName)
+        lastEndedAt = defaults.object(forKey: Key.lastEndedAt) as? Date
     }
 
     /// Loads the unified preset list. If the new "presets" key exists, use it. Otherwise
@@ -216,6 +298,13 @@ final class SettingsStore: ObservableObject {
     var fuseColor: NSColor {
         get { NSColor(hex: fuseColorHex) ?? NSColor(hex: Self.defaultColorHex)! }
         set { fuseColorHex = newValue.hexRGBA }
+    }
+
+    /// The warning (flare) color as an `NSColor` (sRGB). Falls back to the default
+    /// orange on parse failure.
+    var flareColor: NSColor {
+        get { NSColor(hex: flareColorHex) ?? NSColor(hex: Self.defaultFlareColorHex)! }
+        set { flareColorHex = newValue.hexRGBA }
     }
 }
 

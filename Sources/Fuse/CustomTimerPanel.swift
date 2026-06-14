@@ -73,6 +73,8 @@ private struct CustomTimerFormView: View {
 
     @State private var expression: String = ""
     @State private var timerName: String = ""
+    @State private var repeatEnabled: Bool = false
+    @State private var repeatCount: Int = 4
     @State private var errorMessage: String = ""
     @FocusState private var expressionFocused: Bool
 
@@ -99,6 +101,16 @@ private struct CustomTimerFormView: View {
                 .onSubmit { startTimer() }
 
             HStack {
+                Toggle("Repeat", isOn: $repeatEnabled)
+                Spacer()
+                Stepper(value: $repeatCount, in: 2...99) {
+                    Text("×\(repeatCount)")
+                        .monospacedDigit()
+                }
+                .disabled(!repeatEnabled)
+            }
+
+            HStack {
                 Spacer()
                 Button("Cancel") {
                     onClose()
@@ -123,24 +135,17 @@ private struct CustomTimerFormView: View {
         let trimmed = expression.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
 
-        let result: ParseResult
+        let name: String? = timerName.trimmingCharacters(in: .whitespaces).isEmpty ? nil : timerName.trimmingCharacters(in: .whitespaces)
+        let fullExpression = repeatEnabled ? "\(trimmed) x\(repeatCount)" : trimmed
+
         do {
-            result = try TimeParser.parse(trimmed)
+            try AppController.shared.start(expression: fullExpression, name: name)
         } catch let e as ParseError {
             errorMessage = e.reason
             return
         } catch {
             errorMessage = error.localizedDescription
             return
-        }
-
-        let name: String? = timerName.trimmingCharacters(in: .whitespaces).isEmpty ? nil : timerName.trimmingCharacters(in: .whitespaces)
-
-        switch result {
-        case .duration(let interval):
-            TimerEngine.shared.start(duration: interval, name: name)
-        case .deadline(let date):
-            TimerEngine.shared.start(until: date, name: name)
         }
 
         onClose()

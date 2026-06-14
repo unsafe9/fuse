@@ -155,6 +155,9 @@ final class OverlayController {
         let texture = SettingsStore.shared.fuseTexture
         let tipEffect = SettingsStore.shared.fuseTipEffect
         let tipScale = CGFloat(SettingsStore.shared.fuseTipScale)
+        let flareIntensifyEnabled = SettingsStore.shared.flareIntensifyEnabled
+        let flareEnlargeScale = CGFloat(SettingsStore.shared.flareEnlargeScale)
+        let flareColor = SettingsStore.shared.flareColor
 
         for screen in targetScreens() {
             let frame = stripFrame(for: screen.frame, position: position, thickness: thickness, scale: tipScale)
@@ -166,6 +169,10 @@ final class OverlayController {
             view.texture = texture
             view.tipEffect = tipEffect
             view.tipScale = tipScale
+            view.flareIntensifyEnabled = flareIntensifyEnabled
+            view.flareEnlargeScale = flareEnlargeScale
+            view.flareColor = flareColor
+            view.flareLeadSeconds = SettingsStore.flareLeadSeconds
             view.setProgress(renderProgress)
             window.contentView = view
             window.orderFrontRegardless()
@@ -207,9 +214,10 @@ final class OverlayController {
 
     private func tickRender() {
         let progress = renderProgress
+        let remaining = isRunning ? TimerEngine.shared.remaining : .infinity
         let mouseLocation = NSEvent.mouseLocation
         for window in windows {
-            (window.contentView as? FuseView)?.tick(progress: progress)
+            (window.contentView as? FuseView)?.tick(progress: progress, remaining: remaining)
         }
 
         let hoveringFuse = windows.contains { window in
@@ -244,18 +252,27 @@ final class OverlayController {
         case .all:
             return NSScreen.screens
         case .main:
-            return NSScreen.main.map { [$0] } ?? NSScreen.screens
+            return primaryScreen().map { [$0] } ?? NSScreen.screens
         case .id(let wanted):
             if let match = NSScreen.screens.first(where: { $0.displayID == wanted }) {
                 return [match]
             }
-            // Configured display disconnected — fall back to main.
-            if let main = NSScreen.main {
-                log.notice("Configured display \(wanted) not found; falling back to main.")
-                return [main]
+            // Configured display disconnected — fall back to the primary display.
+            if let primary = primaryScreen() {
+                log.notice("Configured display \(wanted) not found; falling back to primary.")
+                return [primary]
             }
             return NSScreen.screens
         }
+    }
+
+    /// The primary display (the one hosting the menu bar), resolved via `CGMainDisplayID`.
+    /// Unlike `NSScreen.main` — which tracks the key-window screen and, for a menu-bar-only
+    /// app with no key window, can shift between auto-repeat rounds — this stays fixed, so a
+    /// repeating timer's overlay reappears on the same display every round.
+    private func primaryScreen() -> NSScreen? {
+        let mainID = CGMainDisplayID()
+        return NSScreen.screens.first { $0.displayID == mainID } ?? NSScreen.main
     }
 
     /// A strip along `position` edge of `screenFrame` (global coords). The line itself is
@@ -290,6 +307,23 @@ private enum FuseMetrics {
     /// the chosen tip size so a bigger tip gets proportionally more room.
     static func tipPadding(thickness: CGFloat, scale: CGFloat) -> CGFloat {
         max(thickness * 1.4, 12) * scale
+    }
+}
+
+// MARK: - ETA formatting
+
+/// Formats a wall-clock instant for the hover ETA (F3), following the user's locale
+/// 12/24-hour preference via `DateFormatter`'s `.short` time style.
+private enum ETAFormat {
+    private static let formatter: DateFormatter = {
+        let f = DateFormatter()
+        f.timeStyle = .short
+        f.dateStyle = .none
+        return f
+    }()
+
+    static func shortTime(_ date: Date) -> String {
+        formatter.string(from: date)
     }
 }
 
@@ -337,12 +371,28 @@ private final class FuseHoverTooltipWindow: NSWindow {
 
     func show(session: TimerSession, remaining: TimeInterval, at point: NSPoint) {
         let trimmedName = session.name?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let name = trimmedName.flatMap { $0.isEmpty ? nil : $0 } ?? "Timer"
-        tooltipView.update(name: name, remaining: TimeFormat.clock(remaining))
+        var name = trimmedName.flatMap { $0.isEmpty ? nil : $0 } ?? "Timer"
+        // F2: append the round count on the name line while repeating ("focus  #3/5").
+        if let round = TimerSession.roundLabel(round: session.round, policy: session.repeatPolicy) {
+            name += "  \(round)"
+        }
+        tooltipView.update(name: name, remaining: TimeFormat.clock(remaining), detail: detail(for: session))
         let size = tooltipView.preferredSize
         setContentSize(size)
         setFrameOrigin(origin(near: point, size: size))
         orderFrontRegardless()
+    }
+
+    /// Builds the secondary detail line: the end-time ETA (F3-C1) and, while repeating,
+    /// the relay's final ETA (F3-C2). Returns `nil` when the end-time setting is off and
+    /// there is nothing to add.
+    private func detail(for session: TimerSession) -> String? {
+        guard SettingsStore.shared.showEndTimeInTooltip else { return nil }
+        var parts = ["ends \(ETAFormat.shortTime(session.endDate))"]
+        if let finish = session.relayFinish() {
+            parts.append("all done ~\(ETAFormat.shortTime(finish))")
+        }
+        return parts.joined(separator: " · ")
     }
 
     func hide() {
@@ -369,6 +419,8 @@ private final class FuseHoverTooltipWindow: NSWindow {
 private final class FuseHoverTooltipView: NSView {
     private var name = "Timer"
     private var remaining = "0:00"
+    /// Secondary info appended after "X left" (F3 ETA / relay ETA), or nil.
+    private var detail: String?
     private let maxTextWidth: CGFloat = 240
     private let padding = NSEdgeInsets(top: 7, left: 10, bottom: 8, right: 10)
     private let lineGap: CGFloat = 2
@@ -383,14 +435,16 @@ private final class FuseHoverTooltipView: NSView {
     }
 
     private var remainingText: String {
-        "\(remaining) left"
+        guard let detail, !detail.isEmpty else { return "\(remaining) left" }
+        return "\(remaining) left · \(detail)"
     }
 
     override var isFlipped: Bool { true }
 
-    func update(name: String, remaining: String) {
+    func update(name: String, remaining: String, detail: String?) {
         self.name = name
         self.remaining = remaining
+        self.detail = detail
         needsDisplay = true
     }
 
@@ -470,10 +524,36 @@ final class FuseView: NSView {
     var texture: FuseTexture = .rope
     var tipEffect: FuseTipEffect = .flame
     var tipScale: CGFloat = 1
+    /// Flare (F6): master — shift the fuse toward `flareColor` near the end.
+    var flareIntensifyEnabled = false
+    /// Flare (F6): how much the flame/tip grows near the end, as a multiplier
+    /// (1× = no growth). Sub-option of intensify.
+    var flareEnlargeScale: CGFloat = 2
+    var flareColor: NSColor = .orange
+    /// Seconds before the end at which flare ramps in (clamped to `total/2`).
+    var flareLeadSeconds: TimeInterval = 30
 
     private var progress: Double = 1
+    /// Remaining seconds, fed by the render timer; drives the flare ramp. Starts at
+    /// `.infinity` so flare never fires before the first tick (and during preview).
+    private var remaining: TimeInterval = .infinity
     /// Monotonic frame counter driving tip flicker; advanced by the render timer.
     private var phase: Int = 0
+
+    /// 0 outside the flare window, ramping 0→1 over the last `lead` seconds. The lead is
+    /// clamped to `total/2` so a short timer doesn't sit flared from the start. Returns 0
+    /// when flare is off so the draw path stays on the existing fast path.
+    ///
+    /// `total` is reconstructed from `remaining / progress` (since the engine's progress
+    /// is `remaining / total`), which the view doesn't carry directly.
+    private var flareFraction: CGFloat {
+        guard flareIntensifyEnabled else { return 0 }
+        guard remaining.isFinite, remaining > 0, progress > 0 else { return 0 }
+        let total = remaining / progress
+        let lead = min(flareLeadSeconds, total / 2)
+        guard lead > 0, remaining <= lead else { return 0 }
+        return CGFloat(min(1, max(0, (lead - remaining) / lead)))
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -491,14 +571,16 @@ final class FuseView: NSView {
         needsDisplay = true
     }
 
-    /// Called by the render timer: stores progress, advances the flicker phase, and
-    /// redraws when the bar moved or the chosen tip effect animates.
-    func tick(progress: Double) {
+    /// Called by the render timer: stores progress/remaining, advances the flicker
+    /// phase, and redraws when the bar moved, the chosen tip effect animates, or the
+    /// flare ramp is active (so the amplification/color transition keeps advancing).
+    func tick(progress: Double, remaining: TimeInterval) {
         let clamped = min(1, max(0, progress))
         let moved = clamped != self.progress
         self.progress = clamped
+        self.remaining = remaining
         phase &+= 1
-        if moved || tipEffect.isAnimated { needsDisplay = true }
+        if moved || tipEffect.isAnimated || flareFraction > 0 { needsDisplay = true }
     }
 
     func containsVisibleFuse(at screenPoint: NSPoint, in window: NSWindow) -> Bool {
@@ -530,6 +612,18 @@ final class FuseView: NSView {
         let filled = CGFloat(progress) * edgeLength
         guard filled > 0 else { return }
 
+        // Flare (F6): near the end, tint the fuse toward `flareColor` and amplify the tip.
+        // The color transition swaps `fuseColor` for the blended value for the duration of
+        // this draw (every helper reads `fuseColor`), then restores. `flareFraction` is
+        // already gated on `flareIntensifyEnabled`, so flare > 0 implies flare is on.
+        let flare = flareFraction
+        let baseColor = fuseColor
+        if flare > 0 {
+            fuseColor = blend(baseColor, flareColor, flare)
+        }
+        let intensify = flare * (flareEnlargeScale - 1)
+        defer { fuseColor = baseColor }
+
         ctx.saveGState()
         // Map the local frame (x = burn direction with tip at x = filled, y = 0 at the
         // screen edge, +y toward the interior) onto the view. Each edge needs its own
@@ -546,7 +640,7 @@ final class FuseView: NSView {
         }
 
         drawTexture(in: ctx, length: filled, cross: thickness)
-        drawTip(in: ctx, at: CGPoint(x: filled, y: thickness / 2), cross: thickness)
+        drawTip(in: ctx, at: CGPoint(x: filled, y: thickness / 2), cross: thickness, intensify: intensify)
         ctx.restoreGState()
     }
 
@@ -647,14 +741,14 @@ final class FuseView: NSView {
 
     // MARK: - Burning tip
 
-    private func drawTip(in ctx: CGContext, at tip: CGPoint, cross c: CGFloat) {
+    private func drawTip(in ctx: CGContext, at tip: CGPoint, cross c: CGFloat, intensify: CGFloat) {
         switch tipEffect {
         case .glow:
             drawGlow(in: ctx, at: tip, cross: c)
         case .flame:
-            drawFlame(in: ctx, at: tip, cross: c)
+            drawFlame(in: ctx, at: tip, cross: c, intensify: intensify)
         case .spark:
-            drawFlame(in: ctx, at: tip, cross: c)
+            drawFlame(in: ctx, at: tip, cross: c, intensify: intensify)
             drawSparks(in: ctx, at: tip, cross: c)
         }
     }
@@ -680,14 +774,19 @@ final class FuseView: NSView {
     /// white-hot core. The hot core sits on the line and the flame bulges into the
     /// interior `tipPadding` headroom (slightly past the configured width) and licks a
     /// little along the burn axis. A gentle flicker scales it each frame.
-    private func drawFlame(in ctx: CGContext, at tip: CGPoint, cross c: CGFloat) {
+    private func drawFlame(in ctx: CGContext, at tip: CGPoint, cross c: CGFloat, intensify: CGFloat) {
         let space = CGColorSpaceCreateDeviceRGB()
-        let f = flicker()
+        let f = flicker(intensify: intensify)
         let clear = fuseColor.withAlphaComponent(0).cgColor
+
+        // Flare (F6): grow the flame body and white-hot core toward the end. 0 leaves the
+        // baseline; 1 reaches ~1.6× body / ~1.5× core.
+        let bodyBoost = 1 + intensify * 0.6
+        let coreBoost = 1 + intensify * 0.5
 
         // Reach from the line center toward the interior; kept just inside the headroom
         // so the gradient's alpha has faded out before the strip edge clips it.
-        let reach = (c / 2 + FuseMetrics.tipPadding(thickness: c, scale: tipScale) * 0.85) * f
+        let reach = (c / 2 + FuseMetrics.tipPadding(thickness: c, scale: tipScale) * 0.85) * f * bodyBoost
         let center = CGPoint(x: tip.x, y: c / 2)
 
         // Outer halo, tinted by the fuse color so the line's hue carries into the flame.
@@ -705,7 +804,7 @@ final class FuseView: NSView {
         // Tight white-hot center right at the burn point on the line.
         let white = NSColor(srgbRed: 1, green: 1, blue: 0.95, alpha: 1).cgColor
         drawRadial(ctx, space, [white, clear], [0, 1],
-                   center: tip, radius: max(c * 0.7, 3.5) * tipScale, scaleX: 1.4, scaleY: 1.2)
+                   center: tip, radius: max(c * 0.7, 3.5) * tipScale * coreBoost, scaleX: 1.4, scaleY: 1.2)
     }
 
     /// A few flickering embers rising off the burn point into the interior, fading with
@@ -751,10 +850,13 @@ final class FuseView: NSView {
     }
 
     /// A gentle multi-sine flicker in roughly 0.7...1.15, deterministic in `phase`.
-    private func flicker() -> CGFloat {
+    /// `intensify` (0...1, flare) widens the wobble and lifts the clamp so the flame
+    /// agitates harder toward the end.
+    private func flicker(intensify: CGFloat = 0) -> CGFloat {
         let t = CGFloat(phase)
-        let v = 0.9 + 0.1 * sin(t * 0.45) + 0.05 * sin(t * 1.3 + 1.7)
-        return max(0.7, min(1.15, v))
+        let gain = 1 + intensify * 1.5
+        let v = 0.9 + 0.1 * gain * sin(t * 0.45) + 0.05 * gain * sin(t * 1.3 + 1.7)
+        return max(0.7, min(1.15 + intensify * 0.35, v))
     }
 
     /// A reproducible pseudo-random value in 0...1 from an integer seed (no RNG state).

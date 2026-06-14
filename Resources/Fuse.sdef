@@ -8,9 +8,15 @@
             <parameter name="named" code="pNam" type="text" optional="yes" description="Optional timer name.">
                 <cocoa key="name"/>
             </parameter>
+            <parameter name="repeating" code="pRep" type="integer" optional="yes" description="Optional total round count for a duration timer's auto-repeat (e.g. 4 = first run plus 3 repeats). Ignored when 1 or less; not valid for a clock-time expression.">
+                <cocoa key="repeating"/>
+            </parameter>
         </command>
         <command name="stop timer" code="FuseStop" description="Stop the running Fuse timer.">
             <cocoa class="Fuse.FuseStopTimerCommand"/>
+        </command>
+        <command name="repeat last timer" code="FuseRpLt" description="Re-start the most recently started timer as a single shot.">
+            <cocoa class="Fuse.FuseRepeatLastTimerCommand"/>
         </command>
         <class name="application" code="capp" description="The Fuse application.">
             <cocoa class="NSApplication"/>
@@ -26,6 +32,21 @@
             </property>
             <property name="timer name" code="tmNm" type="text" access="r" description="The running timer's name, empty if none or unnamed.">
                 <cocoa key="scriptTimerName"/>
+            </property>
+            <property name="ends" code="tmEn" type="text" access="r" description="The running timer's end time as &quot;HH:mm&quot; (24-hour), empty if none.">
+                <cocoa key="scriptEndsAt"/>
+            </property>
+            <property name="round" code="tmRd" type="integer" access="r" description="The running timer's current round (1-based), 0 if none.">
+                <cocoa key="scriptRound"/>
+            </property>
+            <property name="last ended at" code="tmLe" type="text" access="r" description="The last finished timer's end time as &quot;HH:mm&quot; (24-hour), empty if nothing has finished yet.">
+                <cocoa key="scriptLastEndedAt"/>
+            </property>
+            <property name="last started" code="tmLs" type="text" access="r" description="The most recently started timer's time expression (e.g. &quot;5m&quot; or &quot;25m x4&quot;), empty if nothing has been started yet. This is what `repeat last timer` re-starts.">
+                <cocoa key="scriptLastStartedExpression"/>
+            </property>
+            <property name="last started name" code="tmLn" type="text" access="r" description="The most recently started timer's name, empty if none or unnamed.">
+                <cocoa key="scriptLastStartedName"/>
             </property>
         </class>
     </suite>

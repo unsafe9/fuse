@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Auto-repeat** for duration timers. A duration can re-ignite for the same length when
+  it expires, for a fixed number of rounds, firing its completion notification each
+  round. Set it with a trailing `xN` (≥ 2) on a preset expression (`25m x4`, shown as
+  *25 min ×4*), the new **Repeat** row in the Custom Timer panel, or AppleScript's
+  `repeating` argument. Deadline (`:MM` / `HH:MM`) timers don't repeat. The default
+  preset list now ships with `25m x4` (a Pomodoro-style four-round timer).
+- **Round counter** shown while a repeat runs — `#2/4` in the menu's running-timer line
+  and in the hover tooltip.
+- **End time (ETA) in the hover tooltip** — the running timer's end as a wall-clock time
+  (`ends 14:35`, in your locale's 12/24-hour style), plus the projected finish of the
+  whole repeat relay (`all done ~16:10`). New "Show end time in fuse tooltip" toggle in
+  General › Behavior (on by default).
+- **Repeat last timer** — when idle, the menu shows a `↻ Again` item that restarts the
+  most recently started timer as a single shot (re-resolving a deadline to its next
+  occurrence). Also available via the new `repeat last timer` AppleScript command.
+- **Last finished timer recap** — an optional idle-menu line (`Last: tea · ended 14:32
+  (8 min ago)`). New "Show last finished timer in menu" toggle in General › Behavior
+  (off by default).
+- **Final-stretch flare** — "Flare near the end" in Fuse › Appearance (on by default)
+  shifts the fuse toward a warning color (picked with the adjacent color well, orange by
+  default) in the final seconds, with a "Flare size" slider (1×–3×, default 2×)
+  controlling how much the flame grows toward the end. Visual only — the end time never
+  changes.
+- AppleScript read-only properties: `ends` (the running timer's end time as `HH:mm`),
+  `round` (its current round, 1-based), `last ended at` (the last finished timer's end
+  time as `HH:mm`), and `last started` / `last started name` (the most recently started
+  timer's expression and name, for previewing what `repeat last timer` re-runs).
+
+### Fixed
+
+- The menu-bar countdown no longer freezes at "0:00" after a non-repeating timer
+  finishes. Completion was announced while the engine still held the just-expired session,
+  so the title was painted "0:00" and never refreshed once the engine went idle; the
+  engine now goes idle before announcing a terminal finish.
+- Auto-repeat now keeps the overlay on the configured display every round. The "Main
+  Display" target was resolved via `NSScreen.main`, which tracks the key-window screen and
+  drifted between rounds for a menu-bar-only app; it now resolves the primary display via
+  `CGMainDisplayID`.
+- The Settings window now closes with ⌘W.
+
 ## [0.1.3] - 2026-06-13
 
 ### Added

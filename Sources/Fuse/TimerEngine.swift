@@ -35,12 +35,25 @@ final class TimerEngine {
     /// Starts a relative-duration timer. Replaces any running timer silently.
     /// `duration` must be > 0 (callers validate; non-positive is ignored).
     func start(duration: TimeInterval, name: String?) {
+        start(duration: duration, name: name, repeatPolicy: .none)
+    }
+
+    /// Starts a relative-duration timer with an auto-repeat policy. Replaces any
+    /// running timer silently. `duration` must be > 0 (callers validate). When the
+    /// session expires, `tick()` evaluates the policy and either re-ignites for the
+    /// next round or stops.
+    func start(duration: TimeInterval, name: String?, repeatPolicy: RepeatPolicy) {
         guard duration > 0 else {
             log.error("Ignoring start with non-positive duration: \(duration)")
             return
         }
         let start = Date()
-        begin(session: TimerSession(name: name, startDate: start, endDate: start.addingTimeInterval(duration)))
+        begin(session: TimerSession(
+            name: name,
+            startDate: start,
+            endDate: start.addingTimeInterval(duration),
+            repeatPolicy: repeatPolicy
+        ))
     }
 
     /// Starts a timer that fires at an absolute `Date`. Replaces any running timer
@@ -91,18 +104,61 @@ final class TimerEngine {
     }
 
     /// Fires every 0.25s: posts `.fuseTimerTick`, and on expiry completes the session.
+    /// `.fuseTimerCompleted` fires on EVERY round so each finish is observed; if the
+    /// repeat policy yields another round, re-ignite for it, otherwise stop.
     private func tick() {
         guard let current = session else { return }
         if current.endDate.timeIntervalSinceNow <= 0 {
-            stop()
-            NotificationCenter.default.post(
-                name: .fuseTimerCompleted,
-                object: self,
-                userInfo: [fuseSessionKey: current]
-            )
+            if let next = nextRound(after: current) {
+                // Repeating: announce this round's finish, then re-ignite for the next.
+                NotificationCenter.default.post(
+                    name: .fuseTimerCompleted,
+                    object: self,
+                    userInfo: [fuseSessionKey: current]
+                )
+                begin(session: next)
+            } else {
+                // Terminal finish: go idle BEFORE announcing, so observers that read
+                // `session` (e.g. the menu-bar title) see the idle state instead of a
+                // frozen "0:00".
+                stop()
+                NotificationCenter.default.post(
+                    name: .fuseTimerCompleted,
+                    object: self,
+                    userInfo: [fuseSessionKey: current]
+                )
+            }
         } else {
             NotificationCenter.default.post(name: .fuseTimerTick, object: self)
         }
+    }
+
+    /// Evaluates `repeatPolicy` against a just-finished session and returns the next
+    /// round's session, or `nil` when the relay is over. The next session starts now,
+    /// keeps the same length and policy, and bumps `round`. `count` continues while
+    /// `round < n`; `until` continues while the next round would finish at or before
+    /// the policy instant; `forever` always continues; `none` ends.
+    private func nextRound(after finished: TimerSession) -> TimerSession? {
+        let total = finished.total
+        guard total > 0 else { return nil }
+        let start = Date()
+        switch finished.repeatPolicy {
+        case .none:
+            return nil
+        case .count(let n):
+            guard finished.round < n else { return nil }
+        case .until(let date):
+            guard start.addingTimeInterval(total) <= date else { return nil }
+        case .forever:
+            break
+        }
+        return TimerSession(
+            name: finished.name,
+            startDate: start,
+            endDate: start.addingTimeInterval(total),
+            repeatPolicy: finished.repeatPolicy,
+            round: finished.round + 1
+        )
     }
 
     /// Tears down the running session and ticker without posting any user-visible

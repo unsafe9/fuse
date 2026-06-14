@@ -6,6 +6,17 @@ import Foundation
 /// Shared logging subsystem for the whole app.
 let logSubsystem = "com.unsafe9.fuse"
 
+// MARK: - Repeat policy
+
+/// Auto-repeat termination condition. Applies only to duration sessions (an absolute
+/// `deadline` has no meaningful repeat — its end is fixed).
+enum RepeatPolicy: Equatable {
+    case none
+    case count(Int)     // total rounds (e.g. 4 = first + 3 repeats)
+    case until(Date)    // do not start a round that would run past this instant
+    case forever        // until the user stops
+}
+
 // MARK: - Timer session
 
 /// A single in-flight timer. Exactly one exists while a timer runs.
@@ -16,9 +27,41 @@ struct TimerSession: Equatable {
     let startDate: Date
     /// When the timer fires.
     let endDate: Date
+    /// Auto-repeat policy. `.none` for a single-shot or deadline session.
+    var repeatPolicy: RepeatPolicy = .none
+    /// Current round, 1-based. The first session is round 1.
+    var round: Int = 1
 
     /// Full configured length of the timer.
     var total: TimeInterval { endDate.timeIntervalSince(startDate) }
+
+    /// A round label for the active surfaces (menu, hover): "#3/5" for `count`,
+    /// "#3" for `until`/`forever`, and `nil` when not repeating.
+    static func roundLabel(round: Int, policy: RepeatPolicy) -> String? {
+        switch policy {
+        case .none:
+            return nil
+        case .count(let n):
+            return "#\(round)/\(n)"
+        case .until, .forever:
+            return "#\(round)"
+        }
+    }
+
+    /// The final wall-clock instant the whole relay finishes, for ETA "all done ~16:10".
+    /// `count` projects the remaining full rounds onto `endDate`; `until` returns the
+    /// policy instant; `none`/`forever` have no defined finish and return `nil`.
+    func relayFinish() -> Date? {
+        switch repeatPolicy {
+        case .none, .forever:
+            return nil
+        case .count(let n):
+            let remainingRounds = max(0, n - round)
+            return endDate.addingTimeInterval(total * Double(remainingRounds))
+        case .until(let date):
+            return date
+        }
+    }
 }
 
 // MARK: - Fuse position
@@ -241,5 +284,49 @@ enum PresetLabel {
     /// ":15" or "top of hour" for the top-of-hour mark.
     static func markSettings(minute: Int) -> String {
         minute == 0 ? "top of hour" : ":\(String(format: "%02d", minute))"
+    }
+
+    /// Appends a "×N" repeat suffix to a base label when the policy is `count(N)`
+    /// (e.g. "5 min" -> "5 min ×4"). Other policies return the base unchanged.
+    static func withRepeat(_ base: String, policy: RepeatPolicy) -> String {
+        if case .count(let n) = policy {
+            return "\(base) ×\(n)"
+        }
+        return base
+    }
+}
+
+// MARK: - Repeat expression
+
+/// Splits a preset/custom/AppleScript expression into its time expression and an
+/// optional repeat policy. The repeat suffix is a trailing `xN` (case-insensitive),
+/// e.g. "25m x4" -> ("25m", .count(4)). A bare expression carries `.none`.
+enum RepeatExpression {
+    /// Splits `raw` into `(expression, policy)`. Throws `ParseError` when a repeat
+    /// suffix is attached to a deadline expression (`:30`, `14:00`) — only durations
+    /// repeat. The returned `expression` is the trimmed time expression with the
+    /// suffix removed; callers still parse it via `TimeParser`.
+    static func split(_ raw: String) throws -> (expression: String, policy: RepeatPolicy) {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let n = repeatCount(trimmed) else {
+            return (trimmed, .none)
+        }
+        // Strip the trailing "xN" token and any whitespace before it.
+        let expression = String(trimmed[..<trimmed.range(of: " ", options: .backwards)!.lowerBound])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        // A deadline expression cannot repeat.
+        if (try? TimeParser.parse(expression)).map({ if case .deadline = $0 { return true } else { return false } }) == true {
+            throw ParseError(reason: "Repeat (xN) only works with duration timers, not a clock time.")
+        }
+        return (expression, .count(n))
+    }
+
+    /// Parses a trailing `xN` token (e.g. the "x4" in "25m x4") into N (>= 1), or nil
+    /// when there is no valid repeat suffix.
+    private static func repeatCount(_ trimmed: String) -> Int? {
+        guard let lastSpace = trimmed.range(of: " ", options: .backwards) else { return nil }
+        let token = trimmed[lastSpace.upperBound...].lowercased()
+        guard token.hasPrefix("x"), let n = Int(token.dropFirst()), n >= 1 else { return nil }
+        return n
     }
 }

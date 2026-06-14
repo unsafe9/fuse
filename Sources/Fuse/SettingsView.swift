@@ -63,6 +63,13 @@ private struct GeneralTab: View {
             Section {
                 Toggle("Show remaining time in menu bar", isOn: $store.showRemainingInMenuBar)
             }
+
+            Section {
+                Toggle("Show end time in fuse tooltip", isOn: $store.showEndTimeInTooltip)
+                Toggle("Show last finished timer in menu", isOn: $store.showLastFinishedInMenu)
+            } header: {
+                Text("Behavior")
+            }
         }
         .formStyle(.grouped)
         .padding()
@@ -146,11 +153,13 @@ private struct PresetListEditor: View {
         }
     }
 
-    /// "5 min" / "1 h 30 min" for durations, ":15" / "top of hour" for marks. Unparsable
-    /// (shouldn't occur for stored presets) falls back to the raw expression.
+    /// "5 min" / "1 h 30 min" for durations (with a "×N" suffix for repeats), ":15" /
+    /// "top of hour" for marks. Unparsable (shouldn't occur for stored presets) falls
+    /// back to the raw expression.
     private func rowLabel(_ expression: String) -> String {
-        switch Preset.parse(expression) {
-        case .duration(let seconds): return PresetLabel.duration(seconds: seconds)
+        let (timeExpression, policy) = (try? RepeatExpression.split(expression)) ?? (expression, .none)
+        switch Preset.parse(timeExpression) {
+        case .duration(let seconds): return PresetLabel.withRepeat(PresetLabel.duration(seconds: seconds), policy: policy)
         case .mark(let minute): return PresetLabel.markSettings(minute: minute)
         case nil: return expression
         }
@@ -164,7 +173,20 @@ private struct PresetListEditor: View {
     private func add() {
         let trimmed = newExpression.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
-        guard Preset.parse(trimmed) != nil else {
+        let timeExpression: String
+        do {
+            // Accept an optional "xN" repeat suffix; reject it on a deadline mark.
+            (timeExpression, _) = try RepeatExpression.split(trimmed)
+        } catch let e as ParseError {
+            errorMessage = e.reason
+            fieldFocused = true
+            return
+        } catch {
+            errorMessage = error.localizedDescription
+            fieldFocused = true
+            return
+        }
+        guard Preset.parse(timeExpression) != nil else {
             errorMessage = "Invalid time. Try 5m, 1h30m, 90, :15, or :00."
             fieldFocused = true
             return
@@ -236,6 +258,30 @@ private struct FuseTab: View {
                 }
                 .pickerStyle(.segmented)
 
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Flare near the end", isOn: $store.flareIntensifyEnabled)
+                    Text("Near the end, the fuse shifts toward the warning color. The end time stays the same.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    HStack {
+                        Text("Warning color")
+                        Spacer()
+                        ColorPicker("", selection: flareColorBinding)
+                            .labelsHidden()
+                            .disabled(!store.flareIntensifyEnabled)
+                    }
+                    HStack {
+                        Text("Flare size")
+                        Slider(value: $store.flareEnlargeScale,
+                               in: SettingsStore.minFlareScale...SettingsStore.maxFlareScale,
+                               step: 0.1)
+                        Text(String(format: "%.1f×", store.flareEnlargeScale))
+                            .frame(width: 40, alignment: .trailing)
+                            .monospacedDigit()
+                    }
+                    .disabled(!store.flareIntensifyEnabled)
+                }
+
                 HStack {
                     Spacer()
                     Button("Reset to Defaults") { store.resetAppearance() }
@@ -276,6 +322,13 @@ private struct FuseTab: View {
         Binding(
             get: { Color(store.fuseColor) },
             set: { store.fuseColor = NSColor($0) }
+        )
+    }
+
+    private var flareColorBinding: Binding<Color> {
+        Binding(
+            get: { Color(store.flareColor) },
+            set: { store.flareColor = NSColor($0) }
         )
     }
 

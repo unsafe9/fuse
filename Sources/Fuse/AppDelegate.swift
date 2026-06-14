@@ -20,6 +20,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Eagerly realize the shared singletons.
         _ = SettingsStore.shared
         _ = TimerEngine.shared
+        // Realize the app controller so its .fuseTimerCompleted observer is installed.
+        _ = AppController.shared
 
         let permissionManager = PermissionManager()
         let notificationManager = NotificationManager(permissions: permissionManager)

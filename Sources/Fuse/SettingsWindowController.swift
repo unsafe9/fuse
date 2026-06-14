@@ -34,7 +34,7 @@ final class SettingsWindowController: NSObject {
             let hostingController = NSHostingController(
                 rootView: SettingsView(store: SettingsStore.shared)
             )
-            let win = NSWindow(contentViewController: hostingController)
+            let win = SettingsWindow(contentViewController: hostingController)
             win.title = "Fuse Settings"
             win.styleMask = [.titled, .closable, .miniaturizable]
             win.isReleasedWhenClosed = false
@@ -55,5 +55,21 @@ extension SettingsWindowController: NSWindowDelegate {
         // The Fuse tab's `onDisappear` does not reliably fire when the whole window
         // closes, so end any live preview here too.
         NotificationCenter.default.post(name: .fusePreviewEnded, object: self)
+    }
+}
+
+// MARK: - Settings window
+
+/// Settings window that closes on ⌘W. A menu-bar-only (`LSUIElement`) app has no
+/// File ▸ Close menu item, so ⌘W is never wired to `performClose`; handle the key
+/// equivalent directly instead.
+private final class SettingsWindow: NSWindow {
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+           event.charactersIgnoringModifiers == "w" {
+            performClose(nil)
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
     }
 }

@@ -90,8 +90,11 @@ extension StatusItemController: NSMenuDelegate {
         if let session = engine.session {
             let remaining = engine.remaining
             let nameStr = session.name.map { "\($0) — " } ?? ""
+            // Append the round counter (#3/5) while repeating (F2).
+            let roundStr = TimerSession.roundLabel(round: session.round, policy: session.repeatPolicy)
+                .map { " · \($0)" } ?? ""
             let infoItem = NSMenuItem(
-                title: "⏳ \(nameStr)\(TimeFormat.clock(remaining)) left",
+                title: "⏳ \(nameStr)\(TimeFormat.clock(remaining)) left\(roundStr)",
                 action: nil,
                 keyEquivalent: ""
             )
@@ -109,13 +112,51 @@ extension StatusItemController: NSMenuDelegate {
             menu.addItem(.separator())
         }
 
+        // 1b. Idle recap + repeat last (only when no timer runs).
+        if engine.session == nil {
+            var addedIdleRow = false
+
+            // Last finished timer (F5; opt-in, "N min ago" computed at open time).
+            if store.showLastFinishedInMenu, let endedAt = store.lastEndedAt {
+                let nameStr = store.lastEndedName.map { "\($0) · " } ?? ""
+                let lastItem = NSMenuItem(
+                    title: "Last: \(nameStr)ended \(lastEndedLabel(endedAt: endedAt, now: now))",
+                    action: nil,
+                    keyEquivalent: ""
+                )
+                lastItem.isEnabled = false
+                menu.addItem(lastItem)
+                addedIdleRow = true
+            }
+
+            // Repeat last (F4; shown whenever a previous start was recorded).
+            if let expression = store.lastStartedExpression {
+                let nameStr = store.lastStartedName.map { " \"\($0)\"" } ?? ""
+                let againItem = NSMenuItem(
+                    title: "↻ Again: \(expression)\(nameStr)",
+                    action: #selector(repeatLast),
+                    keyEquivalent: ""
+                )
+                againItem.target = self
+                menu.addItem(againItem)
+                addedIdleRow = true
+            }
+
+            if addedIdleRow {
+                menu.addItem(.separator())
+            }
+        }
+
         // 2. Presets (one ordered list; deadline targets recomputed every open)
         for (index, expression) in store.presets.enumerated() {
-            guard let preset = Preset.parse(expression, now: now) else { continue }
+            // Split off any repeat suffix (xN) so the time expression parses, then
+            // reflect the policy as "×N" in the label (F1/F2).
+            guard let split = try? RepeatExpression.split(expression),
+                  let preset = Preset.parse(split.expression, now: now) else { continue }
             let item: NSMenuItem
             switch preset {
             case .duration(let seconds):
-                item = NSMenuItem(title: PresetLabel.duration(seconds: seconds),
+                item = NSMenuItem(title: PresetLabel.withRepeat(PresetLabel.duration(seconds: seconds), policy: split.policy),
                                   action: #selector(startPreset(_:)), keyEquivalent: "")
             case .mark(let minute):
                 let target = DeadlineMath.nextMinuteMark(minute: minute, after: now)
@@ -171,17 +212,20 @@ extension StatusItemController: NSMenuDelegate {
 
     @objc private func startPreset(_ sender: NSMenuItem) {
         let presets = SettingsStore.shared.presets
-        guard presets.indices.contains(sender.tag),
-              let preset = Preset.parse(presets[sender.tag]) else { return }
-        switch preset {
-        case .duration(let seconds):
-            TimerEngine.shared.start(duration: seconds, name: nil)
-        case .mark(let minute):
-            // Recompute the target at click time so a menu held open across the mark
-            // (e.g. sleep/wake) still starts a valid, future-dated timer.
-            let target = DeadlineMath.nextMinuteMark(minute: minute, after: Date())
-            TimerEngine.shared.start(until: target, name: nil)
+        guard presets.indices.contains(sender.tag) else { return }
+        // Route the raw expression (incl. any xN suffix) through AppController so the
+        // repeat policy is applied and the last-started record is written in one place.
+        // Deadline targets are recomputed inside the parser at click time, so a menu
+        // held open across the mark still starts a valid, future-dated timer.
+        do {
+            try AppController.shared.start(expression: presets[sender.tag], name: nil)
+        } catch {
+            log.error("startPreset failed: \(String(describing: error), privacy: .public)")
         }
+    }
+
+    @objc private func repeatLast() {
+        AppController.shared.repeatLast()
     }
 
     @objc private func openCustomTimer() {
@@ -203,5 +247,15 @@ extension StatusItemController: NSMenuDelegate {
         formatter.dateFormat = "HH:mm"
         let timeStr = formatter.string(from: target)
         return "\(PresetLabel.markBase(minute: minute))  (\(timeStr))"
+    }
+
+    /// "14:32 (8 min ago)" for the idle recap (F5). The elapsed minutes are computed at
+    /// menu-open time so the label is fresh each time the menu is shown.
+    private func lastEndedLabel(endedAt: Date, now: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        let timeStr = formatter.string(from: endedAt)
+        let minutesAgo = max(0, Int(now.timeIntervalSince(endedAt) / 60))
+        return "\(timeStr) (\(minutesAgo) min ago)"
     }
 }
