@@ -68,11 +68,15 @@ final class StatusItemController: NSObject {
         if store.showRemainingInMenuBar, TimerEngine.shared.session != nil {
             let remaining = TimerEngine.shared.remaining
             let title = TimeFormat.clock(remaining)
-            button.title = title
-            button.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+            // The engine ticks 4×/s but the clock string only changes once a second; setting
+            // title/font every tick re-lays-out the whole menu bar, so write only on a change.
+            if button.title != title { button.title = title }
+            if button.font == nil {
+                button.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+            }
         } else {
-            button.title = ""
-            button.font = nil
+            if !button.title.isEmpty { button.title = "" }
+            if button.font != nil { button.font = nil }
         }
     }
 }
