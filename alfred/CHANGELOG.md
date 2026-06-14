@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-14
+
+Requires Fuse app **v0.2.0** or newer — it uses the `repeating` argument, the
+`repeat last timer` command, and the `last started` / `last started name` properties
+added in that release.
+
 ### Added
 
 - Repeat suffix: append `xN` to a duration to auto-repeat it (`25m x4` runs four
