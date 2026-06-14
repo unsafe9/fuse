@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-06-14
+
+### Added
+
+- **Notch handling for the top fuse** — on a notched MacBook, a new **Notch**
+  option in Fuse › Placement (top position only) chooses how the top fuse meets
+  the notch: *Draw over the notch* (the default, unchanged), *Draw below the
+  notch* so the whole line clears it, or *Skip the notch* so the fuse jumps
+  across the camera housing instead of hiding behind it. No effect on other
+  edges or on displays without a notch.
+
+### Changed
+
+- The Fuse settings tab is reorganized into **Appearance**, **Placement**, and
+  **Near the end** sections.
+
 ## [0.2.0] - 2026-06-14
 
 ### Added
