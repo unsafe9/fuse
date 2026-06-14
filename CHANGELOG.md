@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-14
+
 ### Added
 
 - **Auto-repeat** for duration timers. A duration can re-ignite for the same length when
