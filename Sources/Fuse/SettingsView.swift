@@ -380,6 +380,19 @@ private struct NotificationsTab: View {
                     Text("Notification Options")
                 }
             }
+
+            Section {
+                Picker("Milestones", selection: $store.milestoneSet) {
+                    ForEach(MilestoneSet.allCases, id: \.self) { set in
+                        Text(set.displayName).tag(set)
+                    }
+                }
+                Text("Get a silent banner partway through, e.g. \u{201C}Halfway \u{00B7} 2:30 left\u{201D}. Independent of the finish notification above.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } header: {
+                Text("Progress")
+            }
         }
         .formStyle(.grouped)
         .padding()

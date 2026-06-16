@@ -184,6 +184,43 @@ enum FuseTipEffect: String, Codable, CaseIterable {
     var isAnimated: Bool { self != .glow }
 }
 
+// MARK: - Progress milestones
+
+/// Which elapsed-progress points fire an interim "milestone" banner partway through a
+/// timer (feature 4, opt-in). Independent of the completion notification.
+enum MilestoneSet: String, Codable, CaseIterable {
+    case off
+    case halfway
+    case thirds
+    case quarters
+    case fifths
+    case finalStretch
+
+    var displayName: String {
+        switch self {
+        case .off: return "Off"
+        case .halfway: return "Halfway (50%)"
+        case .thirds: return "Thirds (33 / 66%)"
+        case .quarters: return "Quarters (25 / 50 / 75%)"
+        case .fifths: return "Fifths (20 / 40 / 60 / 80%)"
+        case .finalStretch: return "Final stretch (75 / 90%)"
+        }
+    }
+
+    /// Elapsed-progress percentages (1...99) at which to fire a banner. `100` is never
+    /// a milestone — the completion notification owns the finish.
+    var percents: [Int] {
+        switch self {
+        case .off: return []
+        case .halfway: return [50]
+        case .thirds: return [33, 66]
+        case .quarters: return [25, 50, 75]
+        case .fifths: return [20, 40, 60, 80]
+        case .finalStretch: return [75, 90]
+        }
+    }
+}
+
 // MARK: - Internal notification names
 
 extension Notification.Name {

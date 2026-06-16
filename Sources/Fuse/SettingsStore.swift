@@ -32,6 +32,7 @@ final class SettingsStore: ObservableObject {
         static let notificationEnabled = "notificationEnabled"
         static let notificationTemplate = "notificationTemplate"
         static let notificationSound = "notificationSound"
+        static let milestoneSet = "milestoneSet"
         static let preventSleep = "preventSleep"
         static let preventDisplaySleep = "preventDisplaySleep"
         static let keepAwakeLidClosed = "keepAwakeLidClosed"
@@ -167,6 +168,12 @@ final class SettingsStore: ObservableObject {
         didSet { defaults.set(notificationSound, forKey: Key.notificationSound) }
     }
 
+    /// Interim progress-milestone banners (off by default). Independent of the
+    /// completion notification.
+    @Published var milestoneSet: MilestoneSet {
+        didSet { defaults.set(milestoneSet.rawValue, forKey: Key.milestoneSet) }
+    }
+
     /// Prevent system idle sleep while a timer is active.
     @Published var preventSleep: Bool {
         didSet { defaults.set(preventSleep, forKey: Key.preventSleep) }
@@ -256,6 +263,7 @@ final class SettingsStore: ObservableObject {
         notificationEnabled = defaults.object(forKey: Key.notificationEnabled) as? Bool ?? true
         notificationTemplate = defaults.string(forKey: Key.notificationTemplate) ?? "Time's up!"
         notificationSound = defaults.object(forKey: Key.notificationSound) as? Bool ?? true
+        milestoneSet = (defaults.string(forKey: Key.milestoneSet)).flatMap(MilestoneSet.init(rawValue:)) ?? .off
         preventSleep = defaults.object(forKey: Key.preventSleep) as? Bool ?? true
         preventDisplaySleep = defaults.object(forKey: Key.preventDisplaySleep) as? Bool ?? true
         keepAwakeLidClosed = defaults.object(forKey: Key.keepAwakeLidClosed) as? Bool ?? false

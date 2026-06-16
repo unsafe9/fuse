@@ -21,6 +21,7 @@ When a timer runs, Fuse draws a line across a full screen edge — over fullscre
 - **Repeat last / last finished** — when no timer is running, the menu offers a one-click `↻ Again` to restart the last timer, and can optionally show a recap of the last finished timer (`Last: tea · ended 14:32`). The recap is toggled in General › Behavior (off by default).
 - **Final-stretch flare** — near the end, the fuse shifts toward a warning color and grows its flame. Toggle in the Fuse › Appearance tab (on by default), with a color well to pick the warning color and a "Flare size" slider for how much the flame grows. Visual only — the end time never changes.
 - **Completion notification** — delivered via the system notification center, with a configurable body and an optional sound.
+- **Progress milestones** — optionally get a silent banner partway through (e.g. *Halfway · 2:30 left*). Pick a preset set in Notifications — halfway, quarters, thirds, fifths, or a final stretch. Off by default and independent of the completion notification.
 - **Remaining time in the menu bar** — optionally show the live countdown next to the icon.
 - **Caffeinate-style power options** — prevent system idle sleep while a timer runs, and optionally keep the Mac awake even with the lid closed.
 - **AppleScript and Alfred** — start and stop timers from scripts or from an Alfred keyword.
@@ -166,6 +167,7 @@ While the Fuse tab is open, a live overlay preview is drawn on screen so color, 
 - Enable notifications (default on).
 - Notification body template (default *Time's up!*).
 - Play sound (default on).
+- Progress milestones — a silent banner partway through, from a preset set (Off, Halfway 50%, Thirds 33/66%, Quarters 25/50/75%, Fifths 20/40/60/80%, or Final stretch 75/90%). Off by default; repeats re-announce each round.
 
 **Power**
 - Prevent system idle sleep while a timer runs (default on).
