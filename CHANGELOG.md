@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-06-17
+
+### Added
+
+- **Progress milestones.** Optionally get a silent banner partway through a
+  timer — at halfway (50%), quarters (25/50/75%), thirds (33/66%), fifths
+  (20/40/60/80%), or a final stretch (75/90%). Off by default and independent
+  of the completion notification; repeating timers re-announce each round.
+  Configure it in Settings › Notifications.
+
 ## [0.2.2] - 2026-06-15
 
 ### Changed
