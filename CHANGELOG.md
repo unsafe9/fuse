@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-06-20
+
+### Fixed
+
+- Power settings now apply immediately while a timer is running. Toggling
+  system sleep prevention, display sleep prevention, or lid-closed wakefulness
+  now reconciles the active power assertions without waiting for the timer to
+  stop or restart.
+
 ## [0.2.3] - 2026-06-17
 
 ### Added
