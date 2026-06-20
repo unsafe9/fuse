@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import IOKit
 import IOKit.ps
 import IOKit.pwr_mgt
@@ -60,6 +61,7 @@ final class PowerManager {
     private var lidHeartbeat: Timer?
     /// Run-loop source for power-source (AC/battery) change notifications.
     private var powerSourceSource: CFRunLoopSource?
+    private var settingsCancellable: AnyCancellable?
 
     /// Begins observing timer start/stop and power-source notifications.
     init() {
@@ -71,6 +73,7 @@ final class PowerManager {
         nc.addObserver(self, selector: #selector(timerStarted), name: .fuseTimerStarted, object: nil)
         nc.addObserver(self, selector: #selector(timerStopped), name: .fuseTimerCompleted, object: nil)
         nc.addObserver(self, selector: #selector(timerStopped), name: .fuseTimerCancelled, object: nil)
+        observePowerSettings()
         registerPowerSourceObserver()
     }
 
@@ -81,32 +84,73 @@ final class PowerManager {
     }
 
     @objc private func timerStarted() {
-        let store = SettingsStore.shared
-
-        if store.preventSleep {
-            acquireAssertion()
-        }
-        if store.preventDisplaySleep {
-            acquireDisplayAssertion()
-        }
-        if store.keepAwakeLidClosed && !lidDisableActive {
-            lidDisableActive = true
-            // Persist the hold before flipping the bit, so a crash is always recoverable.
-            UserDefaults.standard.set(true, forKey: Self.clamshellHeldKey)
-            setClamshellSleepDisabled(true)
-            startLidHeartbeat()
-        }
+        reconcilePowerState()
     }
 
     @objc private func timerStopped() {
-        releaseAssertion()
-        releaseDisplayAssertion()
-        disableLidGuard()
+        releasePowerState()
     }
 
     /// Synchronous best-effort restore for app termination. The IOKit calls are
     /// synchronous, so the clamshell bit is cleared before the process exits.
     func teardownForTermination() {
+        releasePowerState()
+    }
+
+    private func observePowerSettings() {
+        let store = SettingsStore.shared
+        settingsCancellable = Publishers.CombineLatest3(
+            store.$preventSleep,
+            store.$preventDisplaySleep,
+            store.$keepAwakeLidClosed
+        )
+        .receive(on: RunLoop.main)
+        .sink { [weak self] preventSleep, preventDisplaySleep, keepAwakeLidClosed in
+            self?.reconcilePowerState(
+                preventSleep: preventSleep,
+                preventDisplaySleep: preventDisplaySleep,
+                keepAwakeLidClosed: keepAwakeLidClosed
+            )
+        }
+    }
+
+    private func reconcilePowerState() {
+        let store = SettingsStore.shared
+        reconcilePowerState(
+            preventSleep: store.preventSleep,
+            preventDisplaySleep: store.preventDisplaySleep,
+            keepAwakeLidClosed: store.keepAwakeLidClosed
+        )
+    }
+
+    private func reconcilePowerState(
+        preventSleep: Bool,
+        preventDisplaySleep: Bool,
+        keepAwakeLidClosed: Bool
+    ) {
+        guard TimerEngine.shared.session != nil else {
+            releasePowerState()
+            return
+        }
+
+        if preventSleep {
+            acquireAssertion()
+        } else {
+            releaseAssertion()
+        }
+        if preventDisplaySleep {
+            acquireDisplayAssertion()
+        } else {
+            releaseDisplayAssertion()
+        }
+        if keepAwakeLidClosed {
+            enableLidGuard()
+        } else {
+            disableLidGuard()
+        }
+    }
+
+    private func releasePowerState() {
         releaseAssertion()
         releaseDisplayAssertion()
         disableLidGuard()
@@ -161,6 +205,15 @@ final class PowerManager {
     }
 
     // MARK: - Clamshell (lid-close) sleep
+
+    private func enableLidGuard() {
+        guard !lidDisableActive else { return }
+        lidDisableActive = true
+        // Persist the hold before flipping the bit, so a crash is always recoverable.
+        UserDefaults.standard.set(true, forKey: Self.clamshellHeldKey)
+        setClamshellSleepDisabled(true)
+        startLidHeartbeat()
+    }
 
     private func disableLidGuard() {
         guard lidDisableActive else { return }
