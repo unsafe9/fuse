@@ -33,7 +33,8 @@ import os
 /// for the one case we can't reach: the app deleted while the bit is still set.)
 ///
 /// `TimerEngine.cancel()` on app termination guarantees stop runs, so this manager
-/// fully restores power state on a clean exit.
+/// synchronously attempts to restore power state and retains recovery ownership if
+/// IOKit refuses the release.
 ///
 /// OWNER: system.
 final class PowerManager {
@@ -43,10 +44,6 @@ final class PowerManager {
     /// this selector has no entitlement/privilege check, so it works without root.
     private let clamshellSelector: UInt32 = 12
 
-    /// UserDefaults key, persisted `true` while we hold the global clamshell-disable bit.
-    /// A crash leaves it set; the next launch reconciles it (see `reconcileStaleClamshellHold`).
-    private static let clamshellHeldKey = "clamshellHeldByFuse"
-
     private var assertionID: IOPMAssertionID = 0
     private var hasAssertion = false
 
@@ -55,9 +52,12 @@ final class PowerManager {
     private var displayAssertionID: IOPMAssertionID = 0
     private var hasDisplayAssertion = false
 
-    /// True while we hold the clamshell-sleep-disabled bit (paired enable/disable).
-    private var lidDisableActive = false
-    /// Periodic re-assert while `lidDisableActive`, in case the bit is dropped silently.
+    private lazy var clamshellSleepController = ClamshellSleepController {
+        [weak self] disabled in
+        self?.setClamshellSleepDisabled(disabled) ?? false
+    }
+    /// Periodic re-assert while clamshell disable is requested, in case the bit is
+    /// dropped silently.
     private var lidHeartbeat: Timer?
     /// Run-loop source for power-source (AC/battery) change notifications.
     private var powerSourceSource: CFRunLoopSource?
@@ -91,8 +91,8 @@ final class PowerManager {
         releasePowerState()
     }
 
-    /// Synchronous best-effort restore for app termination. The IOKit calls are
-    /// synchronous, so the clamshell bit is cleared before the process exits.
+    /// Synchronous best-effort restore for app termination. A failed clamshell release
+    /// keeps the persisted marker so the next launch can recover it.
     func teardownForTermination() {
         releasePowerState()
     }
@@ -207,41 +207,33 @@ final class PowerManager {
     // MARK: - Clamshell (lid-close) sleep
 
     private func enableLidGuard() {
-        guard !lidDisableActive else { return }
-        lidDisableActive = true
-        // Persist the hold before flipping the bit, so a crash is always recoverable.
-        UserDefaults.standard.set(true, forKey: Self.clamshellHeldKey)
-        setClamshellSleepDisabled(true)
+        guard clamshellSleepController.state != .enableRequested else { return }
+        clamshellSleepController.requestEnable()
         startLidHeartbeat()
     }
 
     private func disableLidGuard() {
-        guard lidDisableActive else { return }
-        lidDisableActive = false
+        clamshellSleepController.requestRelease()
         stopLidHeartbeat()
-        setClamshellSleepDisabled(false)
-        // Bit dropped — clear the persisted hold so the next launch has nothing to undo.
-        UserDefaults.standard.set(false, forKey: Self.clamshellHeldKey)
     }
 
-    /// On launch, drop a clamshell-disable bit that a previous run left set after dying
-    /// without clearing it. Acts only when our own persisted flag is set — so we never
-    /// stomp the bit when we weren't the one holding it — and only here at startup, where
-    /// no timer can yet be keeping the Mac awake.
+    /// On launch, attempt to drop a clamshell-disable bit that a previous run left set
+    /// after dying. Acts only when our own persisted flag is set — so we never stomp the
+    /// bit when we weren't the one holding it — and only here at startup, where no timer
+    /// can yet be keeping the Mac awake.
     private func reconcileStaleClamshellHold() {
-        guard UserDefaults.standard.bool(forKey: Self.clamshellHeldKey) else { return }
+        guard UserDefaults.standard.bool(forKey: ClamshellSleepController.heldMarkerKey) else { return }
         log.notice("Clearing a stale clamshell-sleep-disable hold left by a previous run.")
-        setClamshellSleepDisabled(false)
-        UserDefaults.standard.set(false, forKey: Self.clamshellHeldKey)
+        clamshellSleepController.recoverStaleHold()
     }
 
     /// Toggles the `IOPMrootDomain` clamshell-sleep-disable bit. Opens, calls, and
     /// closes a fresh user client each time; synchronous and root-free.
-    private func setClamshellSleepDisabled(_ disabled: Bool) {
+    private func setClamshellSleepDisabled(_ disabled: Bool) -> Bool {
         let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
         guard service != IO_OBJECT_NULL else {
             log.error("IOPMrootDomain service not found")
-            return
+            return false
         }
         defer { IOObjectRelease(service) }
 
@@ -249,15 +241,17 @@ final class PowerManager {
         let opened = IOServiceOpen(service, mach_task_self_, 0, &connection)
         guard opened == kIOReturnSuccess else {
             log.error("IOServiceOpen(IOPMrootDomain) failed: \(opened)")
-            return
+            return false
         }
         defer { IOServiceClose(connection) }
 
         var input: UInt64 = disabled ? 1 : 0
         let result = IOConnectCallScalarMethod(connection, clamshellSelector, &input, 1, nil, nil)
-        if result != kIOReturnSuccess {
+        guard result == kIOReturnSuccess else {
             log.error("kPMSetClamshellSleepState(\(disabled ? 1 : 0)) failed: \(result)")
+            return false
         }
+        return true
     }
 
     // MARK: - Re-assertion (Apple Silicon power-transition robustness)
@@ -265,10 +259,10 @@ final class PowerManager {
     private func startLidHeartbeat() {
         stopLidHeartbeat()
         let timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
-            guard let self, self.lidDisableActive else { return }
+            guard let self else { return }
             // Re-writing `1` when already set is a no-op; if the bit was dropped it
             // re-transitions and restores the guard.
-            self.setClamshellSleepDisabled(true)
+            self.clamshellSleepController.reassertEnableIfRequested()
         }
         RunLoop.main.add(timer, forMode: .common)
         lidHeartbeat = timer
@@ -284,8 +278,7 @@ final class PowerManager {
         let callback: IOPowerSourceCallbackType = { ctx in
             guard let ctx else { return }
             let manager = Unmanaged<PowerManager>.fromOpaque(ctx).takeUnretainedValue()
-            guard manager.lidDisableActive else { return }
-            manager.setClamshellSleepDisabled(true)
+            manager.clamshellSleepController.reassertEnableIfRequested()
         }
         guard let source = IOPSNotificationCreateRunLoopSource(callback, context)?.takeRetainedValue() else {
             log.error("IOPSNotificationCreateRunLoopSource failed")
