@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-07-30
+
+### Fixed
+
+- Clamshell-sleep cleanup now retains Fuse's recovery marker when IOKit rejects
+  a release, stops all enable reassertion immediately, and retries during the
+  running app, later cleanup paths, and the next launch.
+
 ## [0.2.4] - 2026-06-20
 
 ### Fixed
