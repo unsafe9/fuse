@@ -24,6 +24,7 @@ final class SettingsStore: ObservableObject {
         static let fuseTexture = "fuseTexture"
         static let fuseTipEffect = "fuseTipEffect"
         static let fuseTipScale = "fuseTipScale"
+        static let fuseProgressMode = "fuseProgressMode"
         static let fusePosition = "fusePosition"
         static let notchHandling = "notchHandling"
         static let fuseDisplay = "fuseDisplay"
@@ -60,6 +61,7 @@ final class SettingsStore: ObservableObject {
     /// Fresh-install fuse design: a braided rope with a licking flame tip.
     static let defaultTexture: FuseTexture = .rope
     static let defaultTipEffect: FuseTipEffect = .flame
+    static let defaultProgressMode: FuseProgressMode = .burnDown
     static let defaultPosition: FusePosition = .top
     /// Fresh-install: draw the top fuse across the very top edge (over the notch).
     static let defaultNotchHandling: NotchHandling = .over
@@ -124,6 +126,11 @@ final class SettingsStore: ObservableObject {
             }
             defaults.set(fuseTipScale, forKey: Key.fuseTipScale)
         }
+    }
+
+    /// Whether the visible fuse length burns down or builds up toward the deadline.
+    @Published var fuseProgressMode: FuseProgressMode {
+        didSet { defaults.set(fuseProgressMode.rawValue, forKey: Key.fuseProgressMode) }
     }
 
     /// Which screen edge the fuse is drawn on.
@@ -255,6 +262,7 @@ final class SettingsStore: ObservableObject {
         fuseTexture = (defaults.string(forKey: Key.fuseTexture)).flatMap(FuseTexture.init(rawValue:)) ?? Self.defaultTexture
         fuseTipEffect = (defaults.string(forKey: Key.fuseTipEffect)).flatMap(FuseTipEffect.init(rawValue:)) ?? Self.defaultTipEffect
         fuseTipScale = defaults.object(forKey: Key.fuseTipScale) as? Double ?? Self.defaultTipScale
+        fuseProgressMode = (defaults.string(forKey: Key.fuseProgressMode)).flatMap(FuseProgressMode.init(rawValue:)) ?? Self.defaultProgressMode
         fusePosition = (defaults.string(forKey: Key.fusePosition)).flatMap(FusePosition.init(rawValue:)) ?? Self.defaultPosition
         notchHandling = (defaults.string(forKey: Key.notchHandling)).flatMap(NotchHandling.init(rawValue:)) ?? Self.defaultNotchHandling
         fuseDisplay = (defaults.string(forKey: Key.fuseDisplay)).map(FuseDisplay.init(rawValue:)) ?? .main
@@ -299,7 +307,7 @@ final class SettingsStore: ObservableObject {
     // MARK: Reset
 
     /// Restores the Fuse appearance settings — color, thickness, texture, burning tip,
-    /// tip size, position, and notch offset — to their fresh-install defaults. Leaves everything else
+    /// tip size, progress mode, position, and notch offset — to their fresh-install defaults. Leaves everything else
     /// (overlay toggle, target display, presets, notifications, power) untouched.
     func resetAppearance() {
         fuseColorHex = Self.defaultColorHex
@@ -307,6 +315,7 @@ final class SettingsStore: ObservableObject {
         fuseTexture = Self.defaultTexture
         fuseTipEffect = Self.defaultTipEffect
         fuseTipScale = Self.defaultTipScale
+        fuseProgressMode = Self.defaultProgressMode
         fusePosition = Self.defaultPosition
         notchHandling = Self.defaultNotchHandling
     }

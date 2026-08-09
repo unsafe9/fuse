@@ -250,6 +250,19 @@ private struct FuseTab: View {
                         .frame(width: 40, alignment: .trailing)
                         .monospacedDigit()
                 }
+
+                Picker("Progress style", selection: $store.fuseProgressMode) {
+                    ForEach(FuseProgressMode.allCases, id: \.self) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                if store.fuseProgressMode == .buildUp {
+                    Text("Starts empty, then draws a charged fuse as the deadline gets closer.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             } header: {
                 Text("Appearance")
             }

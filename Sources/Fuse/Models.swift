@@ -184,6 +184,23 @@ enum FuseTipEffect: String, Codable, CaseIterable {
     var isAnimated: Bool { self != .glow }
 }
 
+// MARK: - Fuse progress mode
+
+/// How the visible fuse length maps to timer progress.
+enum FuseProgressMode: String, Codable, CaseIterable {
+    /// Existing behavior: the fuse starts full and burns down as time runs out.
+    case burnDown
+    /// Optional buildup behavior: the fuse starts absent and grows as the deadline nears.
+    case buildUp
+
+    var displayName: String {
+        switch self {
+        case .burnDown: return "Burn down"
+        case .buildUp: return "Build up"
+        }
+    }
+}
+
 // MARK: - Progress milestones
 
 /// Which elapsed-progress points fire an interim "milestone" banner partway through a

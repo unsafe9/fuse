@@ -23,11 +23,11 @@ private let deviceRGB = CGColorSpaceCreateDeviceRGB()
 /// - frame = a strip of the configured `fuseThickness` along the configured edge of
 ///   `screen.frame` in global coordinates (top strip intentionally covers the menu bar).
 ///
-/// The contained `FuseView` renders the line whose filled length is
-/// `TimerEngine.shared.progress × edgeLength` as a Core Animation layer tree, anchored
-/// at the left (horizontal) or bottom (vertical), with a brighter glowing tip at the
-/// receding end. There is no per-frame CPU render loop: per-frame compositing is the
-/// GPU's job, and the controller only does light work on the engine's 0.25s
+/// The contained `FuseView` renders the line whose filled length is derived from
+/// `TimerEngine.shared.progress` and the selected progress mode, as a Core Animation
+/// layer tree anchored at the left (horizontal) or bottom (vertical), with a brighter
+/// glowing tip at the active end. There is no per-frame CPU render loop: per-frame
+/// compositing is the GPU's job, and the controller only does light work on the engine's 0.25s
 /// `.fuseTimerTick` — pushing the new progress/remaining into each view (animated over
 /// 0.25s) and running the hover-tooltip hit test.
 ///
@@ -43,8 +43,8 @@ final class OverlayController {
     /// True while the Settings "Fuse" tab requests a static preview. A real running
     /// timer always wins; preview only draws when no timer is running.
     private var previewActive = false
-    /// Fixed progress drawn during preview (with the glowing tip mid-edge).
-    private let previewProgress: Double = 0.7
+    /// Fixed visible length drawn during preview (with the glowing tip mid-edge).
+    private let previewVisibleProgress: Double = 0.7
 
     /// Begins observing timer + settings + screen-change notifications. The overlay
     /// only becomes visible when a timer is actually running.
@@ -157,9 +157,16 @@ final class OverlayController {
         (isRunning || previewActive) && SettingsStore.shared.overlayEnabled
     }
 
-    /// Progress to draw: the live timer fraction while running, else the fixed preview.
+    /// Engine progress to draw: the live timer fraction while running, else a fixed
+    /// preview value chosen to keep the visible length consistent across modes.
     private var renderProgress: Double {
-        isRunning ? TimerEngine.shared.progress : previewProgress
+        if isRunning { return TimerEngine.shared.progress }
+        switch SettingsStore.shared.fuseProgressMode {
+        case .burnDown:
+            return previewVisibleProgress
+        case .buildUp:
+            return 1 - previewVisibleProgress
+        }
     }
 
     /// Shows or hides the overlay based on the running/preview state and the master toggle.
@@ -183,6 +190,7 @@ final class OverlayController {
         let texture = SettingsStore.shared.fuseTexture
         let tipEffect = SettingsStore.shared.fuseTipEffect
         let tipScale = CGFloat(SettingsStore.shared.fuseTipScale)
+        let progressMode = SettingsStore.shared.fuseProgressMode
         let flareIntensifyEnabled = SettingsStore.shared.flareIntensifyEnabled
         let flareEnlargeScale = CGFloat(SettingsStore.shared.flareEnlargeScale)
         let flareColor = SettingsStore.shared.flareColor
@@ -204,6 +212,7 @@ final class OverlayController {
             view.texture = texture
             view.tipEffect = tipEffect
             view.tipScale = tipScale
+            view.progressMode = progressMode
             view.flareIntensifyEnabled = flareIntensifyEnabled
             view.flareEnlargeScale = flareEnlargeScale
             view.flareColor = flareColor
@@ -545,6 +554,8 @@ final class FuseView: NSView {
     var texture: FuseTexture = .rope
     var tipEffect: FuseTipEffect = .flame
     var tipScale: CGFloat = 1
+    /// Whether the visible fuse length burns down or builds up toward the deadline.
+    var progressMode: FuseProgressMode = .burnDown
     /// Flare (F6): master — shift the fuse toward `flareColor` near the end.
     var flareIntensifyEnabled = false
     /// Flare (F6): how much the flame/tip grows near the end, as a multiplier
@@ -604,6 +615,18 @@ final class FuseView: NSView {
     /// Usable burn length: the notch `skip` case removes the gap so the pace stays constant.
     private var effectiveLength: CGFloat {
         notchGap.map { edgeLength - $0.width } ?? edgeLength
+    }
+
+    /// Visible filled fraction. `progress` itself remains the engine's remaining fraction,
+    /// because flare timing reconstructs total duration from `remaining / progress`.
+    private var visualProgress: CGFloat {
+        let remainingFraction = CGFloat(min(1, max(0, progress)))
+        switch progressMode {
+        case .burnDown:
+            return remainingFraction
+        case .buildUp:
+            return 1 - remainingFraction
+        }
     }
 
     /// 0 outside the flare window, ramping 0→1 over the last `lead` seconds. The lead is
@@ -690,14 +713,14 @@ final class FuseView: NSView {
         guard point.x >= 0, point.y >= 0, point.y <= thickness + pad else { return false }
 
         if let gap = notchGap {
-            let filled = CGFloat(progress) * (edgeLength - gap.width)
+            let filled = visualProgress * (edgeLength - gap.width)
             guard filled > 0 else { return false }
             if point.x <= gap.start { return point.x <= filled + pad }
             if point.x < gap.start + gap.width { return false }  // inside the notch gap
             return point.x - gap.width <= filled + pad           // far side: map out the gap
         }
 
-        let filled = CGFloat(progress) * edgeLength
+        let filled = visualProgress * edgeLength
         guard filled > 0 else { return false }
         return point.x <= min(edgeLength, filled + pad)
     }
@@ -846,6 +869,19 @@ final class FuseView: NSView {
         container.addSublayer(holder)
         tipHolder = holder
 
+        if progressMode == .buildUp {
+            let trailWidth = tipExtent * 3
+            let charge = CALayer()
+            charge.bounds = CGRect(x: 0, y: 0, width: trailWidth, height: side)
+            charge.anchorPoint = CGPoint(x: 1, y: 0.5)
+            charge.position = .zero
+            charge.contentsScale = scale
+            charge.contents = bakeBuildUpChargeTrail(width: trailWidth, height: side, scale: scale)
+            charge.opacity = 0.55
+            holder.addSublayer(charge)
+            attachBuildUpPulse(to: charge)
+        }
+
         let tip = CALayer()
         tip.bounds = CGRect(x: 0, y: 0, width: side, height: side)
         tip.position = .zero
@@ -891,6 +927,19 @@ final class FuseView: NSView {
         layer.add(anim, forKey: "flicker")
     }
 
+    /// Build-up mode uses a slow additive pulse behind the leading tip, like pressure
+    /// charging along the newly drawn fuse.
+    private func attachBuildUpPulse(to layer: CALayer) {
+        let anim = CAKeyframeAnimation(keyPath: "opacity")
+        anim.values = [0.35, 0.85, 0.55, 0.75, 0.35]
+        anim.keyTimes = [0, 0.25, 0.55, 0.78, 1]
+        anim.duration = 1.2
+        anim.repeatCount = .infinity
+        anim.calculationMode = .linear
+        anim.isRemovedOnCompletion = false
+        layer.add(anim, forKey: "buildUpPulse")
+    }
+
     /// GPU ember particles approximating `drawSparks`: warm embers rising into the interior
     /// off the burn point and fading out. Replaces the 7 per-frame ember dots.
     private func buildSparkEmitter(scale: CGFloat, into container: CALayer) {
@@ -930,7 +979,7 @@ final class FuseView: NSView {
     /// smoothly. The notch `skip` case fills two mask pieces around the gap.
     private func applyProgress(animated: Bool) {
         guard let mask = progressMask, let holder = tipHolder else { return }
-        let filled = CGFloat(progress) * effectiveLength
+        let filled = visualProgress * effectiveLength
         let cy = thickness / 2
 
         let run = { (body: () -> Void) in
@@ -1059,6 +1108,32 @@ final class FuseView: NSView {
         return bakedImage(width: side, height: side, scale: scale) { ctx in
             ctx.translateBy(x: extent, y: extent - thickness / 2)
             drawFlame(in: ctx, at: CGPoint(x: 0, y: thickness / 2), cross: thickness)
+        }
+    }
+
+    /// Bakes the build-up mode's comet trail. The layer is anchored with its right edge
+    /// on the active tip, so the glow stretches backward over the newly drawn fuse.
+    private func bakeBuildUpChargeTrail(width: CGFloat, height: CGFloat, scale: CGFloat) -> CGImage? {
+        bakedImage(width: width, height: height, scale: scale) { ctx in
+            let center = CGPoint(x: width - 1, y: height / 2)
+            let clear = fuseColor.withAlphaComponent(0).cgColor
+            let hot = NSColor(srgbRed: 1, green: 0.96, blue: 0.78, alpha: 0.95).cgColor
+            let warm = blend(fuseColor, NSColor(srgbRed: 1, green: 0.62, blue: 0.12, alpha: 1), 0.45)
+                .withAlphaComponent(0.7).cgColor
+
+            ctx.setBlendMode(.plusLighter)
+            drawRadial(ctx, deviceRGB, [hot, warm, clear], [0, 0.28, 1],
+                       center: center,
+                       radius: max(width * 0.35, height * 0.45),
+                       scaleX: 1.85,
+                       scaleY: 0.32)
+
+            ctx.setStrokeColor(hot)
+            ctx.setLineWidth(max(thickness * 0.28, 1))
+            ctx.setLineCap(.round)
+            ctx.move(to: CGPoint(x: width * 0.18, y: center.y))
+            ctx.addLine(to: center)
+            ctx.strokePath()
         }
     }
 
