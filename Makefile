@@ -28,10 +28,12 @@ bundle: build
 	mkdir -p "$(BUNDLE)/Contents/MacOS"; \
 	mkdir -p "$(BUNDLE)/Contents/Resources"; \
 	cp "$$BIN_PATH/$(APP_NAME)" "$(BUNDLE)/Contents/MacOS/$(APP_NAME)"; \
+	cp "$$BIN_PATH/FuseLidGuard" "$(BUNDLE)/Contents/MacOS/FuseLidGuard"; \
 	sed "s/__VERSION__/$(VERSION)/g" Resources/Info.plist > "$(BUNDLE)/Contents/Info.plist"; \
 	bash scripts/make_icns.sh assets/icon.png "$(BUNDLE)/Contents/Resources/AppIcon.icns"; \
 	cp Resources/Fuse.sdef "$(BUNDLE)/Contents/Resources/Fuse.sdef"; \
-	codesign --force --deep -s - "$(BUNDLE)"; \
+	codesign --force -s - --identifier com.unsafe9.fuse.lidguard "$(BUNDLE)/Contents/MacOS/FuseLidGuard"; \
+	codesign --force -s - "$(BUNDLE)"; \
 	echo "bundle: assembled $(BUNDLE) (version $(VERSION))"
 
 dmg: bundle

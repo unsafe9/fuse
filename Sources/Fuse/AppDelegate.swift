@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let overlayController = OverlayController()
         let powerManager = PowerManager()
         let statusItemController = StatusItemController(permissions: permissionManager)
+        LidGuard.shared.refreshHelperStatus()
 
         self.permissionManager = permissionManager
         self.notificationManager = notificationManager
@@ -44,8 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // Clear the lid-close sleep guard synchronously before cancel(), so the
-        // clamshell bit is restored even as the process exits.
+        // Release the power assertions, including the lid guard lease, before exit.
         powerManager?.teardownForTermination()
         // Release power assertions and clear the running timer on exit.
         TimerEngine.shared.cancel()

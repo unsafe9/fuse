@@ -7,14 +7,19 @@ let package = Package(
         .macOS(.v13)
     ],
     targets: [
+        .target(
+            name: "LidGuardShared",
+            path: "Sources/LidGuardShared"
+        ),
         .executableTarget(
             name: "Fuse",
+            dependencies: ["LidGuardShared"],
             path: "Sources/Fuse"
         ),
-        .testTarget(
-            name: "FuseTests",
-            dependencies: ["Fuse"],
-            path: "Tests/FuseTests"
+        .executableTarget(
+            name: "FuseLidGuard",
+            dependencies: ["LidGuardShared"],
+            path: "Sources/FuseLidGuard"
         )
     ]
 )

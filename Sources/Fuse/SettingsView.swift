@@ -416,6 +416,7 @@ private struct NotificationsTab: View {
 
 private struct PowerTab: View {
     @ObservedObject var store: SettingsStore
+    @ObservedObject private var lidGuard = LidGuard.shared
 
     var body: some View {
         Form {
@@ -430,13 +431,73 @@ private struct PowerTab: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Toggle("Keep Mac awake with lid closed",
                            isOn: $store.keepAwakeLidClosed)
-                    Text("Disables lid-close sleep while a timer runs. No admin password needed.")
+                    Text("Turns off system sleep while a timer runs, through the Fuse lid helper. Sleep comes back as soon as the timer ends or Fuse quits.")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                }
+                if store.keepAwakeLidClosed || lidGuard.helperStatus != .notInstalled {
+                    LidHelperRow(lidGuard: lidGuard)
                 }
             }
         }
         .formStyle(.grouped)
         .padding()
+        .onAppear { lidGuard.refreshHelperStatus() }
+    }
+}
+
+private struct LidHelperRow: View {
+    @ObservedObject var lidGuard: LidGuard
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            if lidGuard.isRunningAdminTask || lidGuard.helperStatus == .checking {
+                ProgressView()
+                    .controlSize(.small)
+            } else if lidGuard.helperStatus == .ready {
+                Button("Uninstall\u{2026}") { lidGuard.uninstallHelper() }
+            } else {
+                Button(actionTitle) { lidGuard.installHelper() }
+            }
+        }
+    }
+
+    private var title: String {
+        switch lidGuard.helperStatus {
+        case .checking: return "Lid helper"
+        case .notInstalled: return "Lid helper not installed"
+        case .outdated: return "Lid helper needs an update"
+        case .stopped: return "Lid helper not running"
+        case .ready: return "Lid helper installed"
+        }
+    }
+
+    private var detail: String {
+        switch lidGuard.helperStatus {
+        case .checking:
+            return "Checking the helper\u{2026}"
+        case .notInstalled, .outdated:
+            return "Installing asks for an administrator password once."
+        case .stopped:
+            return "Reinstall it, or allow it under System Settings \u{203A} General \u{203A} Login Items."
+        case .ready:
+            return "It restores system sleep by itself if Fuse quits or crashes."
+        }
+    }
+
+    private var actionTitle: String {
+        switch lidGuard.helperStatus {
+        case .outdated: return "Update\u{2026}"
+        case .stopped: return "Reinstall\u{2026}"
+        default: return "Install\u{2026}"
+        }
     }
 }

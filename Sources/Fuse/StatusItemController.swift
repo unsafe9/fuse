@@ -197,6 +197,14 @@ extension StatusItemController: NSMenuDelegate {
             menu.addItem(warnItem)
         }
 
+        // 4b. Lid helper attention (cached status; refreshed for the next open)
+        if store.keepAwakeLidClosed || LidGuard.shared.sleepLeftDisabled {
+            LidGuard.shared.refreshHelperStatus()
+        }
+        if let lidItem = lidGuardAttentionItem(keepAwakeLidClosed: store.keepAwakeLidClosed) {
+            menu.addItem(lidItem)
+        }
+
         // 5. Settings
         let settingsItem = NSMenuItem(title: "Settings\u{2026}", action: #selector(openSettings), keyEquivalent: "")
         settingsItem.target = self
@@ -240,11 +248,44 @@ extension StatusItemController: NSMenuDelegate {
         permissions.resolve()
     }
 
+    @objc private func installLidHelper() {
+        LidGuard.shared.installHelper()
+    }
+
+    @objc private func restoreSystemSleep() {
+        LidGuard.shared.restoreSystemSleep()
+    }
+
     @objc private func openSettings() {
         SettingsWindowController.shared.show()
     }
 
     // MARK: - Helpers
+
+    /// Surfaces a lid helper that cannot do its job, and system sleep left off without
+    /// a lease, which only the helper normally clears.
+    private func lidGuardAttentionItem(keepAwakeLidClosed: Bool) -> NSMenuItem? {
+        let lidGuard = LidGuard.shared
+        let title: String
+        let action: Selector
+        if lidGuard.sleepLeftDisabled {
+            title = "\u{26A0} System sleep left off \u{2014} click to restore"
+            action = #selector(restoreSystemSleep)
+        } else if keepAwakeLidClosed {
+            switch lidGuard.helperStatus {
+            case .notInstalled: title = "\u{26A0} Lid helper not installed \u{2014} click to install"
+            case .outdated: title = "\u{26A0} Lid helper out of date \u{2014} click to update"
+            case .stopped: title = "\u{26A0} Lid helper not running \u{2014} click to reinstall"
+            case .checking, .ready: return nil
+            }
+            action = #selector(installLidHelper)
+        } else {
+            return nil
+        }
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        return item
+    }
 
     private func markLabel(minute: Int, target: Date) -> String {
         let formatter = DateFormatter()

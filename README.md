@@ -23,7 +23,7 @@ When a timer runs, Fuse draws a line across a full screen edge — over fullscre
 - **Completion notification** — delivered via the system notification center, with a configurable body and an optional sound.
 - **Progress milestones** — optionally get a silent banner partway through (e.g. *Halfway · 2:30 left*). Pick a preset set in Notifications — halfway, quarters, thirds, fifths, or a final stretch. Off by default and independent of the completion notification.
 - **Remaining time in the menu bar** — optionally show the live countdown next to the icon.
-- **Caffeinate-style power options** — prevent system idle sleep while a timer runs, and optionally keep the Mac awake even with the lid closed.
+- **Caffeinate-style power options** — prevent system idle sleep while a timer runs, and optionally keep the Mac awake even with the lid closed (through a small helper installed once with an administrator password).
 - **AppleScript and Alfred** — start and stop timers from scripts or from an Alfred keyword.
 
 ## Install
@@ -177,9 +177,13 @@ While the Fuse tab is open, a live overlay preview is drawn on screen so color, 
 
 **Notifications.** Completion notifications need notification permission. If it hasn't been granted, the menu surfaces a *Notifications disabled — click to fix* item that requests authorization, or — once denied — deep-links System Settings straight to Fuse's own row in the Notifications pane (via the per-app `…Notifications-Settings.extension?id=<bundle id>` URL) so *Allow Notifications* is one click away.
 
-**Keep awake with lid closed.** This option disables clamshell-close sleep through the `IOPMrootDomain` user client (the same rootless mechanism Amphetamine's Closed-Display Mode uses) — **no administrator password, ever.** Fuse sets the bit when a timer starts and clears it when the timer ends or the app quits. On Apple Silicon the bit can be dropped across a power-source change (plugging/unplugging the charger), so Fuse re-asserts it on power-source changes and on a periodic heartbeat while a timer runs.
+**Keep awake with lid closed.** macOS lets only Apple-signed processes hold a power assertion that applies to a closed lid, and the kernel's clamshell bit that any app can set is rewritten by powerd whenever it re-evaluates lid-close state, for example when the charger is plugged in with the lid shut. So this option works through a small root helper, `FuseLidGuard`, which turns system sleep off with `pmset -a disablesleep 1` while a timer runs. Install it once from Settings › Power, or from the menu's *Lid helper not installed* item; it asks for an administrator password and installs a LaunchDaemon (`/Library/LaunchDaemons/com.unsafe9.fuse.lidguard.plist`, with its binary in `/Library/PrivilegedHelperTools/`). The daemon lives outside Fuse.app, so moving or deleting the app does not strand it.
 
-> The kernel only re-evaluates lid-close sleep when this bit transitions, so Fuse always clears it on every stop path including app termination. The bit is global, in-RAM kernel state that the kernel does *not* release when the app dies, so Fuse also persists a flag while it holds the bit and reconciles on the next launch: if it finds the flag set with no timer running (i.e. a previous crash or force-quit), it drops the bit so a closed lid sleeps again. A reboot clears the bit regardless. The only case neither reaches — deleting the app while a timer is mid-run with the bit set — self-heals on the next reboot.
+> `pmset disablesleep` is stored on disk and survives reboots, so Fuse never flips it directly. While a timer runs, Fuse holds a power assertion named *Fuse lid-closed keep-awake* with a two-minute timeout that it renews every 30 seconds, and the daemon keeps sleep off exactly while that assertion exists. Fuse tells the daemon right away when it takes or drops the assertion, and the daemon also checks every 15 seconds. powerd releases the assertion the moment Fuse quits, crashes, or is force-killed, and it expires if Fuse hangs, so sleep comes back at once on a normal stop, within 15 seconds after a crash, and within about two and a quarter minutes after a hang. The daemon also turns sleep back on when launchd stops it, and on its next start after a crash or reboot. It only turns sleep back on when it was the one that turned it off, so a `pmset disablesleep` you set yourself is left alone. If the lid is already closed when the timer ends, the daemon has the kernel re-apply its lid-close policy, so the Mac sleeps as usual unless an external display on AC keeps it in clamshell mode.
+>
+> While such a timer runs, all system sleep is off, including Apple menu › Sleep, not only lid-close sleep.
+
+If system sleep is ever left off on Fuse's behalf with no timer running, for example because the helper was deleted by hand, the menu shows *System sleep left off — click to restore*; `sudo pmset -a disablesleep 0` does the same from a terminal. Remove the helper with *Uninstall…* in Settings › Power or `sudo /Applications/Fuse.app/Contents/MacOS/FuseLidGuard uninstall`. If Fuse.app is already gone, run `sudo launchctl bootout system/com.unsafe9.fuse.lidguard` and delete the two files above.
 
 ## Development
 
@@ -188,7 +192,7 @@ The build is driven by `make` and Swift Package Manager.
 | Target          | Does                                                                 |
 | --------------- | ------------------------------------------------------------------- |
 | `make build`    | Compile with `swift build -c release`.                              |
-| `make bundle`   | Assemble `build/Fuse.app` (Info.plist, icon, sdef, ad-hoc codesign).|
+| `make bundle`   | Assemble `build/Fuse.app` (Info.plist, icon, sdef, lid helper, ad-hoc codesign).|
 | `make dmg`      | Build a compressed DMG with an `/Applications` symlink.             |
 | `make install`  | Bundle and install to `/Applications/Fuse.app`.                    |
 | `make run`      | Bundle and launch the app.                                          |
