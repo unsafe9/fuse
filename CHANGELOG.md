@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-26
+
+### Changed
+
+- **Keep Mac awake with lid closed now works through a small root helper.** The
+  earlier rootless clamshell bit was rewritten by macOS whenever it re-evaluated
+  lid-close state, so a Mac with its lid shut could still fall asleep, for
+  example as soon as the charger was plugged in. Fuse now installs a
+  LaunchDaemon once, with an administrator password, that turns system sleep
+  off with `pmset disablesleep` for exactly as long as a running Fuse timer
+  holds its lease. Sleep comes back at once when the timer ends, within 15
+  seconds if Fuse crashes or is force-killed, within a few minutes if Fuse
+  hangs, and at the next boot. A lid that is already closed when the timer
+  ends sleeps as usual.
+
+### Added
+
+- Settings › Power shows the lid helper's state with Install, Update, and
+  Uninstall buttons. The menu flags a missing or stopped helper, and offers to
+  turn system sleep back on if it is ever left off without a running timer.
+
 ## [0.3.0] - 2026-08-09
 
 ### Added
