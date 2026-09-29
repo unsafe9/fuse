@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-09-30
+
+### Fixed
+
+- **The screen no longer locks when a timer ends in clamshell mode.** With the
+  lid closed, an external display, and the charger connected, the lid helper
+  cleared the kernel's clamshell sleep bit that macOS sets for that setup, so the
+  Mac started to sleep, blanked the display, and locked the screen before macOS
+  woke it again. The helper now leaves the bit alone in clamshell mode and only
+  re-applies lid-close sleep when the Mac would really sleep. Update the helper
+  from Settings › Power or the menu after installing.
+
 ## [0.4.0] - 2026-09-26
 
 ### Changed
