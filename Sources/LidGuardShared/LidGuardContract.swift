@@ -7,7 +7,7 @@ public enum LidGuardContract {
     public static let label = "com.unsafe9.fuse.lidguard"
 
     /// Bump when an installed daemon must be replaced for the current Fuse to work.
-    public static let helperVersion = 1
+    public static let helperVersion = 2
 
     public static let leaseAssertionName = "Fuse lid-closed keep-awake"
 

@@ -1,4 +1,6 @@
 import Foundation
+import IOKit
+import IOKit.ps
 import LidGuardShared
 
 /// The system-wide sleep switch (`pmset disablesleep`) and the marker recording that
@@ -44,12 +46,58 @@ enum SleepHold {
     /// Turning `SleepDisabled` off does not make the kernel re-check a lid that is
     /// already closed, so a timer ending with the lid shut would leave the Mac awake. A
     /// 1 -> 0 transition of the clamshell bit makes the kernel apply its own lid-close
-    /// policy, which still keeps an external display on AC awake. Skipped while another
-    /// process holds a lid-close assertion, because powerd wants the bit set then.
+    /// policy. powerd owns that bit and sets it for desktop mode or a lid-close
+    /// assertion; clearing it then starts a real sleep that powerd aborts only after the
+    /// display has gone dark and the screen has locked, so skip it in both cases.
     private static func reapplyLidCloseSleep() {
-        guard RootDomain.isClamshellClosed, !Assertions.anyAppliesOnLidClose() else { return }
+        guard RootDomain.isClamshellClosed,
+              !Assertions.anyAppliesOnLidClose(),
+              !DesktopMode.isActive else { return }
         RootDomain.setClamshellSleepDisabled(true)
         RootDomain.setClamshellSleepDisabled(false)
+    }
+}
+
+/// powerd's "desktop mode": an external display connected while on AC power, which keeps
+/// a closed lid awake. WindowServer reports it to powerd privately, so this reads the
+/// same inputs from the registry and the power source.
+enum DesktopMode {
+    static var isActive: Bool {
+        onACPower && externalDisplayConnected
+    }
+
+    private static var onACPower: Bool {
+        guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+              let type = IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue() else {
+            return false
+        }
+        return (type as String) == kIOPMACPowerKey
+    }
+
+    /// Apple silicon publishes each external display pipe as an `IOMobileFramebufferShim`
+    /// marked `external`, which carries `DisplayAttributes` only while a display is
+    /// attached. Intel Macs have no such service; their kernel checks desktop mode itself
+    /// before a clamshell sleep, so reporting false there keeps the reapply harmless.
+    private static var externalDisplayConnected: Bool {
+        var iterator: io_iterator_t = IO_OBJECT_NULL
+        guard IOServiceGetMatchingServices(
+            kIOMainPortDefault, IOServiceMatching("IOMobileFramebufferShim"), &iterator
+        ) == kIOReturnSuccess else { return false }
+        defer { IOObjectRelease(iterator) }
+
+        while case let service = IOIteratorNext(iterator), service != IO_OBJECT_NULL {
+            defer { IOObjectRelease(service) }
+            if property(service, "external") as? Bool == true,
+               property(service, "DisplayAttributes") != nil {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func property(_ service: io_service_t, _ key: String) -> Any? {
+        IORegistryEntryCreateCFProperty(service, key as CFString, kCFAllocatorDefault, 0)?
+            .takeRetainedValue()
     }
 }
 
